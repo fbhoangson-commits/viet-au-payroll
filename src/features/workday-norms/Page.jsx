@@ -57,23 +57,15 @@ export default function Page() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const fixedFieldMap = useMemo(() => FIXED_COMPONENTS.map(component => {
-    const aliases = new Set([component.code, ...component.labels].filter(Boolean).map(x => norm(x).replace(/_/g, ' ')));
-    const field = fields.find(f => [f.code, f.field_code, f.name, f.label, f.key, f.field_key].some(x => x && aliases.has(norm(x).replace(/_/g, ' '))));
-    return { ...component, field };
-  }), [fields]);
+  const fixedFieldMap = useMemo(() => FIXED_COMPONENTS.map(component => ({ ...component, field: fields.find(f => [f.code, f.field_code, f.name, f.label].some(x => x && component.labels.includes(norm(x)) || x && norm(x).replace(/_/g, ' ') === norm(component.code).replace(/_/g, ' '))) })), [fields]);
   const fixedGroupId = useMemo(() => groups.find(g => norm(g.name) === 'co dinh' || norm(g.code) === 'fixed')?.id, [groups]);
   const normByEmployee = useMemo(() => new Map(norms.filter(n => n.policy_version_id === policyId && n.employee_id).map(n => [String(n.employee_id), n])), [norms, policyId]);
-  const rateMap = useMemo(() => new Map(rateValues
-    .filter(v => v.policy_version_id === policyId && (!fixedGroupId || v.group_id === fixedGroupId))
-    .map(v => [String(v.employee_id), v])), [rateValues, policyId, fixedGroupId]);
+  const rateMap = useMemo(() => new Map(rateValues.filter(v => v.policy_version_id === policyId && (!fixedGroupId || v.group_id === fixedGroupId)).map(v => [v.employee_id, v])), [rateValues, policyId, fixedGroupId]);
   const rows = useMemo(() => employees.map(e => {
-    const position = getEmployeePosition(e); const employeeId = String(e.id || e.supabase_id || ''); const workdayNorm = normByEmployee.get(employeeId) || normByEmployee.get(String(e.supabase_id || '')); const stored = rateMap.get(employeeId) || rateMap.get(String(e.supabase_id || ''));
+    const position = getEmployeePosition(e); const workdayNorm = normByEmployee.get(String(e.id)) || normByEmployee.get(String(e.supabase_id || '')); const stored = rateMap.get(e.id) || rateMap.get(e.supabase_id);
     const values = stored?.values || {}; const components = fixedFieldMap.map(c => ({ ...c, value: getRateValue(values, c.field, c) }));
     const missing = components.filter(c => c.value === undefined || c.value === null || c.value === '').map(c => c.labels[0]);
-    const days = Number(workdayNorm?.workday_count);
-    const parsedComponents = components.map(c => ({ ...c, numericValue: c.value === undefined || c.value === null || c.value === '' ? null : (typeof c.value === 'number' ? c.value : parseNumber(c.value)) }));
-    const total = parsedComponents.every(c => c.numericValue !== null && Number.isFinite(c.numericValue)) ? parsedComponents.reduce((sum, c) => sum + c.numericValue, 0) : null;
+    const days = Number(workdayNorm?.workday_count); const total = components.every(c => c.value !== undefined && c.value !== null && c.value !== '') ? components.reduce((sum, c) => sum + Number(c.value), 0) : null;
     const daily = total !== null && Number.isFinite(days) && days > 0 ? total / days : null; const hourly = daily === null ? null : daily / 8; const minute = hourly === null ? null : hourly / 60;
     return { employee: e, code: getCode(e), name: getName(e), position, workdayNorm, days, components, total, daily, hourly, minute, missing };
   }).filter(r => !search || norm([r.code, r.name, r.position].join(' ')).includes(norm(search))), [employees, normByEmployee, rateMap, fixedFieldMap, search]);
@@ -132,7 +124,7 @@ export default function Page() {
     {message && <div className={`wn-message ${message.type}`}><AlertCircle size={16}/><span>{message.text}</span></div>}
     {importSummary?.errors?.length > 0 && <details className="wn-errors"><summary>Xem {importSummary.errors.length} dòng cần kiểm tra</summary><ul>{importSummary.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></details>}
     <div className="wn-formula"><strong>Công thức:</strong> Lương/ngày Công = tổng 4 thành phần lương cố định lấy từ Định Mức Lương ÷ Số ngày công; Đơn giá Giờ = Lương/ngày Công ÷ 8; Đơn giá Phút = Đơn giá Giờ ÷ 60. <span>Các thành phần lương được lấy ngầm từ Định Mức Lương, không hiển thị thành cột riêng.</span></div>
-    <div className="wn-table-wrap"><table className="wn-table"><thead><tr><th>Mã Nhân Viên</th><th>Họ và Tên</th><th>Vị trí</th><th>Số ngày công</th><th>Lương/ngày Công</th><th>Đơn giá Giờ</th><th>Đơn giá Phút</th></tr></thead><tbody>{rows.map(r => <tr key={r.employee.id}><td className="wn-code">{r.code}</td><td><strong>{r.name}</strong><small>{r.employee.employee_group || r.employee.custom_fields?.employee_group || r.employee['Nhóm'] || ''}</small></td><td>{r.position || '—'}</td><td>{r.workdayNorm ? money(r.days) : <span className="wn-missing">Chưa cấu hình</span>}</td><td className={r.daily === null ? 'wn-no-result' : 'wn-daily'}>{r.daily === null ? <span title={[...r.missing, !r.workdayNorm ? 'Chưa có định mức ngày công' : ''].filter(Boolean).join(', ')}>Thiếu dữ liệu</span> : money(r.daily)}</td><td className={r.hourly === null ? 'wn-no-result' : 'wn-daily'}>{r.hourly === null ? '—' : money(r.hourly)}</td><td className={r.minute === null ? 'wn-no-result' : 'wn-daily'}>{r.minute === null ? '—' : money(r.minute)}</td></tr>)}{!rows.length && <tr><td colSpan={7} className="wn-empty">{loading ? 'Đang tải dữ liệu...' : 'Không có dữ liệu phù hợp.'}</td>}</tbody></table></div>
+    <div className="wn-table-wrap"><table className="wn-table"><thead><tr><th>Mã Nhân Viên</th><th>Họ và Tên</th><th>Vị trí</th><th>Số ngày công</th><th>Lương/ngày Công</th><th>Đơn giá Giờ</th><th>Đơn giá Phút</th></tr></thead><tbody>{rows.map(r => <tr key={r.employee.id}><td className="wn-code">{r.code}</td><td><strong>{r.name}</strong><small>{r.employee.employee_group || r.employee.custom_fields?.employee_group || r.employee['Nhóm'] || ''}</small></td><td>{r.position || '—'}</td><td>{r.workdayNorm ? money(r.days) : <span className="wn-missing">Chưa cấu hình</span>}</td><td className={r.daily === null ? 'wn-no-result' : 'wn-daily'}>{r.daily === null ? <span title={[...r.missing, !r.workdayNorm ? 'Chưa có định mức ngày công' : ''].filter(Boolean).join(', ')}>Thiếu dữ liệu</span> : money(r.daily)}</td><td className={r.hourly === null ? 'wn-no-result' : 'wn-daily'}>{r.hourly === null ? '—' : money(r.hourly)}</td><td className={r.minute === null ? 'wn-no-result' : 'wn-daily'}>{r.minute === null ? '—' : money(r.minute)}</td></tr>)}{!rows.length && <tr><td colSpan={7} className="wn-empty">{loading ? 'Đang tải dữ liệu...' : 'Không có dữ liệu phù hợp.'}</td></tr>}</tbody></table></div>
     <div className="wn-footer">Hiển thị {rows.length}/{employees.length} nhân sự · Lương/ngày Công, Đơn giá Giờ và Đơn giá Phút là kết quả tính toán tham chiếu; không tự thay đổi các thành phần lương gốc hoặc công thức tính lương.</div>
   </section>;
 }
