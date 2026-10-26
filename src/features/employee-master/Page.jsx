@@ -11,11 +11,18 @@ import './styles/employee-master.css';
 const PAGE_SIZE = 10;
 const LABELS = {
   employee_code: 'Mã Nhân Viên', full_name: 'Họ và Tên', name: 'Họ và Tên',
-  status: 'Trạng Thái', department: 'Phòng Ban', position: 'Chức Vụ',
-  job_title: 'Chức Vụ', email: 'Email', phone: 'Điện Thoại',
-  phone_number: 'Điện Thoại', gender: 'Giới Tính', date_of_birth: 'Ngày Sinh',
-  start_date: 'Ngày Vào Làm', hire_date: 'Ngày Vào Làm', end_date: 'Ngày Nghỉ Việc',
-  created_at: 'Ngày Tạo', updated_at: 'Cập Nhật Lúc'
+  status: 'Trạng thái nhân sự', department: 'Bộ phận', position: 'Chức danh',
+  job_title: 'Chức danh', email: 'Email', phone: 'Điện thoại',
+  phone_number: 'Điện thoại', gender: 'Giới tính', date_of_birth: 'Ngày sinh',
+  start_date: 'Ngày vào làm', hire_date: 'Ngày vào làm', end_date: 'Ngày nghỉ',
+  address: 'Địa chỉ', notes: 'Ghi chú hồ sơ',
+  national_id: 'MST / CCCD', tax_code: 'MST / CCCD',
+  employment_type: 'Phân loại', employee_group: 'Nhóm',
+  dependents_count: 'Người phụ thuộc', social_insurance: 'Tham gia BHXH',
+  created_at: 'Ngày tạo', updated_at: 'Cập nhật lúc',
+  'MST / CCCD': 'MST / CCCD', 'Phân loại': 'Phân loại', 'Nhóm': 'Nhóm',
+  'Tham gia BHXH': 'Tham gia BHXH', 'Người phụ thuộc': 'Người phụ thuộc',
+  'Ghi chú hồ sơ': 'Ghi chú hồ sơ'
 };
 // Explicit import-header mapping is required even when employees is empty.
 // Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
@@ -27,7 +34,10 @@ const IMPORT_HEADER_MAP = {
   'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'position': 'position', 'job_title': 'job_title',
   'email': 'email', 'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone',
   'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngày nghỉ việc': 'end_date',
-  'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes'
+  'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes',
+  'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date', 'mst / cccd': null,
+  'phân loại': null, 'phan loai': null, 'nhóm': null, 'nhom': null,
+  'tham gia bhxh': null, 'người phụ thuộc': null, 'nguoi phu thuoc': null
 };
 const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
 const mapImportHeader = header => {
@@ -154,11 +164,16 @@ export default function Page() {
 
   const fields = useMemo(() => {
     const importedOrder = employees.flatMap(row => customFieldOrderOf(row));
+    const uniqueImported = [...new Set(importedOrder)].filter(k => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(k));
+    // If records were imported from an Excel template, its Header order is the canonical
+    // display order. Do not append unrelated physical schema columns (e.g. national_id,
+    // tax_code, employment_type) that were not present in that workbook.
+    if (uniqueImported.length) {
+      return uniqueImported.map(key => ({ key, label: labelFor(key) }));
+    }
     const keys = new Set(employees.flatMap(row => Object.keys(row).filter(k => !['custom_fields','custom_field_order'].includes(k))));
     DEFAULT_FIELDS.forEach(f => { if (!keys.size || keys.has(f.key)) keys.add(f.key); });
-    const ordered = [...new Set(importedOrder)].filter(k => keys.has(k));
-    const rest = [...keys].filter(k => !ordered.includes(k));
-    return [...ordered, ...rest].filter(k => !['id'].includes(k)).map(key => ({ key, label: labelFor(key) }));
+    return [...keys].filter(k => !['id','created_at','updated_at'].includes(k)).map(key => ({ key, label: labelFor(key) }));
   }, [employees]);
 
   const filtered = useMemo(() => employees.filter(row => {
@@ -238,21 +253,23 @@ export default function Page() {
         const dynamicFields = {};
         const importedOrder = [];
         for (const [header, value] of Object.entries(raw)) {
-          // Missing columns and blank cells never erase existing data.
-          if (value === null || value === undefined || String(value).trim() === '') continue;
+          // Keep every workbook Header and its order, including columns whose cells are blank.
+          // Blank cells never erase existing data.
           const mappedKey = mapImportHeader(header);
           const converted = value instanceof Date ? value.toISOString() : value;
-          // Only explicitly supported canonical fields are sent as physical columns. Every
-          // other Header—including dependents_count, employee_group, and future columns—is
-          // stored as dynamic data instead of being posted as a PostgreSQL column.
           const physicalImportKeys = new Set([
             'employee_code', 'full_name', 'status', 'department', 'position', 'job_title',
             'email', 'phone', 'phone_number', 'gender', 'date_of_birth', 'start_date',
             'hire_date', 'end_date', 'address', 'notes'
           ]);
+          const fieldKey = mappedKey && physicalImportKeys.has(mappedKey) ? mappedKey : header;
+          if (!importedOrder.includes(fieldKey)) importedOrder.push(fieldKey);
+          if (value === null || value === undefined || String(value).trim() === '') continue;
+          // Only explicitly supported canonical fields are sent as physical columns. Every
+          // other Header—including dependents_count, employee_group, and future columns—is
+          // stored as dynamic data instead of being posted as a PostgreSQL column.
           if (mappedKey && physicalImportKeys.has(mappedKey)) normalized[mappedKey] = converted;
           else dynamicFields[header] = converted;
-          importedOrder.push(mappedKey && physicalImportKeys.has(mappedKey) ? mappedKey : header);
         }
         const code = norm(normalized.employee_code || raw[importPreview.codeHeader]);
         normalized.employee_code = code;

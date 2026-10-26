@@ -1,13 +1,14 @@
-# Patch V16 — Employee Master import fallback
+# V17 — Nhân Sự Master Excel order/display patch
 
-This patch contains only the changed file:
-- `src/features/employee-master/Page.jsx`
+Chỉ thay đổi `src/features/employee-master/Page.jsx`.
 
-Changes:
-- Restricts import Headers sent as physical columns to an explicit allowlist. Unknown Headers such as `dependents_count` and `employee_group`, and future custom Headers, are stored in `custom_fields` JSONB.
-- Strengthens schema-cache fallback so a rejected top-level field is moved to dynamic JSONB and the save is retried.
-- Does not change authentication, RLS, other modules, or database schema.
+Sửa:
+- Giữ thứ tự Header đúng theo file Excel, kể cả cột toàn ô trống.
+- Không tự hiển thị thêm các cột vật lý không có trong file Excel khi đã có Header order.
+- Bổ sung nhãn tiếng Việt cho các trường thường gặp.
+- Các trường không có ánh xạ vật lý (MST / CCCD, Phân loại, Nhóm, Tham gia BHXH, Người phụ thuộc) được lưu trong custom_fields theo Header Excel.
+- Ô trống không ghi đè giá trị đã có.
 
-Prerequisite: V15 migration must already have been applied so `employees.custom_fields` and `employees.custom_field_order` exist.
+Cập nhật bằng cách chép đè file Page.jsx lên đúng đường dẫn trong repository, commit/push và chờ Cloudflare build. Không cần SQL mới nếu migration custom_fields/custom_field_order của V15 đã chạy thành công.
 
-This patch was not tested against the live Supabase project. After deploying, verify the Cloudflare deployment uses the new commit before re-importing.
+Chưa kiểm thử trực tiếp với Supabase production; xác minh sau deploy bằng một bản import thử đã sao lưu.
