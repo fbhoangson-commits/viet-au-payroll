@@ -12,7 +12,8 @@ function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [active, setActive] = useState('dashboard');
+  const resolvePath = (path) => { const slug = String(path || '/').replace(/^\/+|\/+$/g, '') || 'dashboard'; return allItems.some(item => item.slug === slug) ? slug : 'dashboard'; };
+  const [active, setActive] = useState(() => resolvePath(window.location.pathname));
   const [expanded, setExpanded] = useState(['TỔNG QUAN']);
   const [query, setQuery] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -33,7 +34,15 @@ function App() {
   const current = allItems.find(item => item.slug === active) || allItems[0];
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
   const filtered = useMemo(() => NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [query]);
-  const select = (item, group) => { setActive(item.slug); setExpanded([group.title]); setMobileOpen(false); history.replaceState(null, '', `/${item.slug}`); };
+  const select = (item, group) => { setActive(item.slug); setExpanded([group.title]); setMobileOpen(false); if (window.location.pathname !== `/${item.slug}`) window.history.pushState({ slug: item.slug }, '', `/${item.slug}`); };
+  React.useEffect(() => {
+    const syncPath = () => { const slug = resolvePath(window.location.pathname); setActive(slug); const item = allItems.find(x => x.slug === slug); if (item) setExpanded([item.group]); };
+    window.addEventListener('popstate', syncPath);
+    const expected = `/${resolvePath(window.location.pathname)}`;
+    if (window.location.pathname !== expected) window.history.replaceState({ slug: resolvePath(window.location.pathname) }, '', expected);
+    syncPath();
+    return () => window.removeEventListener('popstate', syncPath);
+  }, []);
   if (!authReady) return <div className="auth-loading"><div className="auth-spinner"/><span>Đang kiểm tra phiên đăng nhập…</span></div>;
   if (!isSupabaseConfigured || !session) return <Login onLogin={setSession} />;
   return <div className="app-shell">

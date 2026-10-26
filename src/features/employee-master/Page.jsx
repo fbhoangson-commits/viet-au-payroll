@@ -3,9 +3,9 @@ import * as XLSX from 'xlsx';
 import {
   Search, Plus, Download, Upload, FileDown, RefreshCw, Users, UserCheck,
   UserX, Eye, Pencil, X, Save, Filter, ChevronLeft, ChevronRight,
-  AlertCircle, CheckCircle2, FileSpreadsheet, ShieldAlert
+  AlertCircle, CheckCircle2, FileSpreadsheet, ShieldAlert, Settings2, Trash2
 } from 'lucide-react';
-import { fetchEmployees, saveEmployee, getCurrentUserProfile } from './services/employeeService.js';
+import { fetchEmployees, saveEmployee, getCurrentUserProfile, fetchEmployeeColumnConfigs, saveEmployeeColumnConfigs } from './services/employeeService.js';
 import './styles/employee-master.css';
 
 const PAGE_SIZE = 10;
@@ -69,8 +69,10 @@ const customFieldOrderOf = row => Array.isArray(row?.custom_field_order) ? row.c
 const valueForField = (row, key) => Object.prototype.hasOwnProperty.call(row || {}, key) ? row[key] : row?.custom_fields?.[key];
 const buildEmployeePayload = (input, previous = null) => {
   const source = { ...input };
-  const customFields = { ...(previous?.custom_fields && typeof previous.custom_fields === 'object' ? previous.custom_fields : {}) };
-  const customOrder = [...(Array.isArray(previous?.custom_field_order) ? previous.custom_field_order : [])];
+  const customFields = { ...(previous?.custom_fields && typeof previous.custom_fields === 'object' ? previous.custom_fields : {}), ...(source.custom_fields && typeof source.custom_fields === 'object' ? source.custom_fields : {}) };
+  const incomingOrder = Array.isArray(source.custom_field_order) ? source.custom_field_order : [];
+  const previousOrder = Array.isArray(previous?.custom_field_order) ? previous.custom_field_order : [];
+  const customOrder = [...incomingOrder, ...previousOrder.filter(key => !incomingOrder.includes(key))];
   const dbKeys = new Set(['id','employee_code','full_name','name','status','department','position','job_title','email','phone','phone_number','gender','date_of_birth','start_date','hire_date','end_date','address','notes','created_at','updated_at','custom_fields','custom_field_order']);
   for (const [key, value] of Object.entries(source)) {
     if (['id','created_at','updated_at','custom_fields','custom_field_order'].includes(key)) continue;
@@ -149,6 +151,11 @@ export default function Page() {
   const [importBusy, setImportBusy] = useState(false);
   const fileRef = useRef(null);
   const [profile, setProfile] = useState(null);
+  const [columnConfigs, setColumnConfigs] = useState([]);
+  const [showColumnConfig, setShowColumnConfig] = useState(false);
+  const [columnDraft, setColumnDraft] = useState([]);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configWarning, setConfigWarning] = useState('');
 
   async function reload() {
     setLoading(true); setError('');
@@ -156,6 +163,8 @@ export default function Page() {
       const [rows, userProfile] = await Promise.all([fetchEmployees(), getCurrentUserProfile()]);
       setEmployees(rows.map(expandEmployee));
       setProfile(userProfile);
+      try { const configs = await fetchEmployeeColumnConfigs(); setColumnConfigs(configs); setConfigWarning(''); }
+      catch (configError) { setConfigWarning(/employee_master_column_configs/i.test(configError?.message || '') ? 'Cần chạy migration cấu hình cột trong Supabase trước khi lưu cấu hình.' : (configError?.message || 'Không tải được cấu hình cột.')); }
     } catch (e) {
       setError(e?.message || 'Không thể tải danh sách nhân sự.');
     } finally { setLoading(false); }
@@ -163,18 +172,48 @@ export default function Page() {
   useEffect(() => { reload(); }, []);
 
   const fields = useMemo(() => {
+    const configuredFields = [...columnConfigs].sort((a,b) => Number(a.display_order || 0) - Number(b.display_order || 0));
+    if (configuredFields.length) return configuredFields.map(c => ({ key: c.field_key, label: c.label || labelFor(c.field_key), data_type: c.data_type || 'text', options: Array.isArray(c.options) ? c.options : [], show_in_list: c.is_active !== false && c.show_in_list !== false, is_system: Boolean(c.is_system), is_active: c.is_active !== false }));
     const importedOrder = employees.flatMap(row => customFieldOrderOf(row));
     const uniqueImported = [...new Set(importedOrder)].filter(k => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(k));
-    // If records were imported from an Excel template, its Header order is the canonical
-    // display order. Do not append unrelated physical schema columns (e.g. national_id,
-    // tax_code, employment_type) that were not present in that workbook.
-    if (uniqueImported.length) {
-      return uniqueImported.map(key => ({ key, label: labelFor(key) }));
-    }
+    if (uniqueImported.length) return uniqueImported.map((key, index) => ({ key, label: labelFor(key), data_type: ['employee_code','full_name','name','email','phone','address','hire_date','start_date','date_of_birth'].includes(key) ? 'text' : 'dropdown', options: [...new Set(employees.map(r => norm(valueForField(r,key))).filter(Boolean))], show_in_list: index < 7 }));
     const keys = new Set(employees.flatMap(row => Object.keys(row).filter(k => !['custom_fields','custom_field_order'].includes(k))));
     DEFAULT_FIELDS.forEach(f => { if (!keys.size || keys.has(f.key)) keys.add(f.key); });
-    return [...keys].filter(k => !['id','created_at','updated_at'].includes(k)).map(key => ({ key, label: labelFor(key) }));
-  }, [employees]);
+    return [...keys].filter(k => !['id','created_at','updated_at'].includes(k)).map((key,index) => ({ key, label: labelFor(key), data_type: 'text', options: [], show_in_list: index < 7 }));
+  }, [employees, columnConfigs]);
+  const listFields = fields.filter(f => f.show_in_list !== false && !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key));
+
+  function openColumnConfig() {
+    const base = fields.map((f, index) => ({ field_key: f.key, label: f.label, data_type: f.data_type || 'text', show_in_list: f.show_in_list !== false, display_order: index, options: Array.isArray(f.options) ? f.options : [], is_system: ['employee_code','full_name'].includes(f.key), is_active: f.is_active !== false }));
+    setColumnDraft(base); setShowColumnConfig(true); setConfigWarning('');
+  }
+  function updateColumnDraft(index, patch) { setColumnDraft(old => old.map((f,i) => i === index ? { ...f, ...patch } : f)); }
+  function addColumnDraft() {
+    const label = window.prompt('Nhập tên cột mới:');
+    if (!label || !label.trim()) return;
+    const key = `custom_${label.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${Date.now().toString().slice(-4)}`;
+    setColumnDraft(old => [...old, { field_key:key, label:label.trim(), data_type:'text', show_in_list:false, display_order:old.length, options:[], is_system:false, is_active:true }]);
+  }
+  async function saveColumnDraft() {
+    setConfigSaving(true); setError('');
+    try {
+      const normalized = columnDraft.map((f,index) => ({ ...f, display_order:index, field_key:String(f.field_key).trim(), label:String(f.label || f.field_key).trim() }));
+      if (normalized.some(f => !f.field_key || !f.label)) throw new Error('Mã cột và tên cột không được để trống.');
+      if (new Set(normalized.map(f=>f.field_key)).size !== normalized.length) throw new Error('Mã cột bị trùng.');
+      const saved = await saveEmployeeColumnConfigs(normalized);
+      setColumnConfigs(saved.sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0)));
+      setShowColumnConfig(false); setNotice({type:'success',text:'Đã lưu cấu hình cột lên Supabase.'});
+    } catch (e) { setConfigWarning(e?.message || 'Không lưu được cấu hình cột.'); }
+    finally { setConfigSaving(false); }
+  }
+  async function addDropdownOption(field, value) {
+    const current = columnConfigs.find(c=>c.field_key===field.key) || field;
+    const options = [...new Set([...(Array.isArray(current.options)?current.options:[]), value])];
+    const record = { field_key:field.key, label:current.label || field.label, data_type:'dropdown', show_in_list:current.show_in_list !== false, display_order:Number(current.display_order ?? fields.findIndex(f=>f.key===field.key)), options, is_system:Boolean(current.is_system), is_active:true };
+    try { const saved = await saveEmployeeColumnConfigs([record]); setColumnConfigs(old=>[...old.filter(c=>c.field_key!==field.key), ...saved].sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0))); return true; }
+    catch (e) { setError(`Không lưu được giá trị Dropdown: ${e.message}`); return false; }
+  }
+
 
   const filtered = useMemo(() => employees.filter(row => {
     const inactive = isInactive(row);
@@ -288,6 +327,26 @@ export default function Page() {
           }
         } catch (e) { failed.push({ row: i+2, code, message: e.message }); }
       }
+      // Persist column definitions from workbook Headers; preserve workbook order.
+      try {
+        const importedConfigs = importPreview.headers.map((header, index) => {
+          const mappedKey = mapImportHeader(header);
+          const physical = new Set(['employee_code','full_name','status','department','position','job_title','email','phone','phone_number','gender','date_of_birth','start_date','hire_date','end_date','address','notes']);
+          const key = mappedKey && physical.has(mappedKey) ? mappedKey : header;
+          const values = [...new Set(importPreview.rows.map(r=>norm(r[header])).filter(Boolean))];
+          const isCoreText = ['employee_code','full_name','name','email','phone','phone_number','address','notes','date_of_birth','start_date','hire_date','end_date'].includes(key);
+          const likelyDropdown = !isCoreText && (values.length <= 50 || /phòng ban|bộ phận|chức vụ|chức danh|phân loại|nhóm|trạng thái|bhxh|giới tính/i.test(header));
+          const existingConfig = columnConfigs.find(c=>c.field_key===key);
+          return { field_key:key, label:header, data_type: existingConfig?.data_type || (likelyDropdown ? 'dropdown' : 'text'), show_in_list: existingConfig ? existingConfig.show_in_list : index < 7, display_order:index, options: [...new Set([...(existingConfig?.options || []), ...(likelyDropdown ? values : [])])], is_system:['employee_code','full_name'].includes(key), is_active:true };
+        });
+        const importedKeys = new Set(importedConfigs.map(c=>c.field_key));
+        const retainedConfigs = columnConfigs.filter(c=>!importedKeys.has(c.field_key)).map((c,index)=>({...c, display_order: importedConfigs.length + index}));
+        const savedConfigs = await saveEmployeeColumnConfigs([...importedConfigs, ...retainedConfigs]);
+        setColumnConfigs(savedConfigs.sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0)));
+        setConfigWarning('');
+      } catch (configError) {
+        setConfigWarning(`Đã nhập dữ liệu nhưng chưa lưu được cấu hình cột: ${configError.message}. Kiểm tra migration và RLS.`);
+      }
       await reload();
       if (failed.length) {
         setError(`Đã xử lý ${created+updated} hồ sơ; ${failed.length} dòng lỗi. ${failed.slice(0,3).map(x=>`Dòng ${x.row} (${x.code}): ${x.message}`).join(' | ')}`);
@@ -307,6 +366,7 @@ export default function Page() {
         <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook([], 'Template-Nhan-Su-Master.xlsx')}><FileDown size={16}/> Tải Template</button>
         <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook(filtered)}><Download size={16}/> Export Excel</button>
         <button className="em-btn em-btn-light" onClick={()=>fileRef.current?.click()}><Upload size={16}/> Import Excel</button>
+        <button className="em-btn em-btn-light" onClick={openColumnConfig}><Settings2 size={16}/> Cấu hình giao diện</button>
         <button className="em-btn em-btn-primary" onClick={startCreate}><Plus size={17}/> Thêm Nhân Sự</button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={e=>{if(e.target.files?.[0]) readImport(e.target.files[0]); e.target.value='';}}/>
       </div>
@@ -318,14 +378,15 @@ export default function Page() {
     </div>
     {notice && <div className={`em-alert success`}><CheckCircle2 size={17}/>{notice.text}<button onClick={()=>setNotice(null)} aria-label="Đóng"><X size={15}/></button></div>}
     {error && <div className="em-alert danger"><AlertCircle size={17}/><span>{error}</span><button onClick={()=>setError('')} aria-label="Đóng"><X size={15}/></button></div>}
+    {configWarning && <div className="em-alert danger"><AlertCircle size={17}/><span>{configWarning}</span><button onClick={()=>setConfigWarning('')} aria-label="Đóng"><X size={15}/></button></div>}
     <div className="em-toolbar">
       <div className="em-search"><Search size={17}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Tìm mã nhân viên, họ tên, phòng ban..."/></div>
       <div className="em-filters"><Filter size={16}/><select value={statusFilter} onChange={e=>{setStatusFilter(e.target.value);setPage(1);}}><option value="active">Đang làm việc</option><option value="inactive">Đã nghỉ việc</option><option value="all">Tất cả nhân sự</option></select><select value={filterField} onChange={e=>{setFilterField(e.target.value);setFilterValue('');setPage(1);}}><option value="">Chọn trường lọc</option>{fields.filter(f=>!isInternalKey(f.key)).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}</select>{filterField && <select value={filterValue} onChange={e=>{setFilterValue(e.target.value);setPage(1);}}><option value="">Tất cả giá trị</option>{filterValues.map(v=><option key={v} value={v}>{v}</option>)}</select>}</div>
       <button className="em-icon-btn" title="Tải lại dữ liệu" onClick={reload}><RefreshCw size={17}/></button>
     </div>
     <div className="em-table-wrap">
-      <table className="em-table"><thead><tr>{fields.filter(f => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key)).map(f=><th key={f.key}>{f.label.toLocaleUpperCase('vi')}</th>)}<th></th></tr></thead>
-      <tbody>{loading ? <tr><td colSpan={fields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={fields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={fields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{fields.filter(f => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key)).map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
+      <table className="em-table"><thead><tr>{listFields.map(f=><th key={f.key}>{f.label.toLocaleUpperCase('vi')}</th>)}<th></th></tr></thead>
+      <tbody>{loading ? <tr><td colSpan={listFields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{listFields.map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
       <div className="em-table-footer"><span>{filtered.length} hồ sơ · Trang {Math.min(page,pages)} / {pages}</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft size={16}/></button><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight size={16}/></button></div></div>
     </div>
     <div className="em-permission-note"><ShieldAlert size={15}/><span>Quyền đọc/ghi được kiểm soát bởi phiên đăng nhập và chính sách RLS của Supabase. Hồ sơ tài khoản: {profile?.appUser ? 'đã tìm thấy trong app_users' : 'chưa xác minh được ánh xạ app_users; thao tác sẽ tuân theo RLS'}.</span></div>
@@ -333,9 +394,16 @@ export default function Page() {
     {showForm && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setShowForm(false);}}}><section className="em-modal">
       <header><div><small>HỒ SƠ NHÂN SỰ</small><h3>{selected ? displayName(selected) : 'Thêm Nhân Sự'}</h3></div><button className="em-icon-btn" onClick={()=>setShowForm(false)}><X size={18}/></button></header>
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
-      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/> : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
+      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
       <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
+    </section></div>}
+
+    {showColumnConfig && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setShowColumnConfig(false);}}><section className="em-modal em-config-modal"><header><div><small>CẤU HÌNH NHÂN SỰ MASTER</small><h3>Cấu hình cột giao diện</h3><p>Thứ tự danh sách độc lập với hồ sơ chi tiết. Bỏ chọn “Hiện trên danh sách” chỉ đưa cột vào hồ sơ chi tiết, không xóa dữ liệu.</p></div><button className="em-icon-btn" onClick={()=>setShowColumnConfig(false)}><X size={18}/></button></header>
+      {configWarning && <div className="em-alert danger">{configWarning}</div>}
+      <div className="em-config-actions"><button className="em-btn em-btn-light" onClick={addColumnDraft}><Plus size={15}/> Thêm cột</button><span>Mã cột phải duy nhất. Cột Mã Nhân Viên và Họ và Tên không thể ẩn khỏi hồ sơ.</span></div>
+      <div className="em-config-table-wrap"><table className="em-config-table"><thead><tr><th>Thứ tự</th><th>Mã cột</th><th>Tên cột</th><th>Kiểu dữ liệu</th><th>Hiện trên danh sách</th><th>Danh mục Dropdown</th><th>Thao tác</th></tr></thead><tbody>{columnDraft.map((field,index)=><tr key={`${field.field_key}-${index}`}><td><div className="em-order-controls"><button type="button" disabled={index===0} onClick={()=>setColumnDraft(old=>{const a=[...old];[a[index-1],a[index]]=[a[index],a[index-1]];return a;})}>↑</button><button type="button" disabled={index===columnDraft.length-1} onClick={()=>setColumnDraft(old=>{const a=[...old];[a[index+1],a[index]]=[a[index],a[index+1]];return a;})}>↓</button></div></td><td><code>{field.field_key}</code></td><td><input value={field.label} onChange={e=>updateColumnDraft(index,{label:e.target.value})}/></td><td><select value={field.data_type||'text'} onChange={e=>updateColumnDraft(index,{data_type:e.target.value})}><option value="text">Văn bản</option><option value="number">Số</option><option value="date">Ngày</option><option value="currency">Tiền tệ</option><option value="checkbox">Có/Không</option><option value="dropdown">Dropdown</option><option value="multi_select">Nhiều lựa chọn</option></select></td><td><input type="checkbox" checked={field.show_in_list!==false} onChange={e=>updateColumnDraft(index,{show_in_list:e.target.checked})}/></td><td>{field.data_type==='dropdown'||field.data_type==='multi_select'?<textarea rows="2" value={(field.options||[]).join('\n')} placeholder="Mỗi lựa chọn một dòng" onChange={e=>updateColumnDraft(index,{options:[...new Set(e.target.value.split('\n').map(v=>v.trim()).filter(Boolean))]})}/>:<span className="em-config-muted">—</span>}</td><td>{field.is_system?<span className="em-config-muted">Bắt buộc</span>:<button className="em-icon-btn" title={field.is_active===false?'Khôi phục cột':'Ngừng sử dụng cột'} onClick={()=>updateColumnDraft(index,{is_active:field.is_active===false,show_in_list:field.is_active===false?false:false})}>{field.is_active===false?<Plus size={15}/>:<Trash2 size={15}/>}</button>}</td></tr>)}</tbody></table></div>
+      <footer><button className="em-btn em-btn-light" onClick={()=>setShowColumnConfig(false)}>Hủy</button><button className="em-btn em-btn-primary" disabled={configSaving} onClick={saveColumnDraft}><Save size={15}/>{configSaving?'Đang lưu…':'Lưu cấu hình'}</button></footer>
     </section></div>}
 
     {importPreview && <div className="em-modal-backdrop"><section className="em-modal em-import-modal"><header><div><small>IMPORT EXCEL</small><h3>Xem trước dữ liệu</h3><p>{importPreview.fileName} · {importPreview.rows.length} dòng</p></div><button className="em-icon-btn" onClick={()=>setImportPreview(null)}><X size={18}/></button></header>
