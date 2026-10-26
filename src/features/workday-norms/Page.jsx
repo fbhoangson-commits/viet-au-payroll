@@ -58,8 +58,8 @@ export default function Page() {
     const values = stored?.values || {}; const components = fixedFieldMap.map(c => ({ ...c, value: c.field ? values[c.field.id] : undefined }));
     const missing = components.filter(c => c.value === undefined || c.value === null || c.value === '').map(c => c.labels[0]);
     const days = Number(workdayNorm?.workday_count); const total = components.every(c => c.value !== undefined && c.value !== null && c.value !== '') ? components.reduce((sum, c) => sum + Number(c.value), 0) : null;
-    const daily = total !== null && Number.isFinite(days) && days > 0 ? total / days : null;
-    return { employee: e, code: getCode(e), name: getName(e), position, workdayNorm, days, components, total, daily, missing };
+    const daily = total !== null && Number.isFinite(days) && days > 0 ? total / days : null; const hourly = daily === null ? null : daily / 8; const minute = hourly === null ? null : hourly / 60;
+    return { employee: e, code: getCode(e), name: getName(e), position, workdayNorm, days, components, total, daily, hourly, minute, missing };
   }).filter(r => !search || norm([r.code, r.name, r.position].join(' ')).includes(norm(search))), [employees, normByPosition, rateMap, fixedFieldMap, search]);
 
   async function importFile(file) {
@@ -69,21 +69,46 @@ export default function Page() {
       if (isExcel) { const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }); const ws = wb.Sheets[wb.SheetNames[0]]; data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false }); }
       else { const text = (await file.text()).replace(/^\uFEFF/, ''); const wb = XLSX.read(text, { type: 'string' }); data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false }); }
       if (!data.length) throw new Error('File không có dòng dữ liệu.');
-      const headers = Object.keys(data[0]); const positionHeader = headers.find(h => ['vi tri', 'chuc danh', 'chuc vu', 'position', 'job title'].includes(norm(h)));
+      const headers = Object.keys(data[0]);
+      const codeHeader = headers.find(h => ['ma nhan vien', 'ma nv', 'employee code', 'employee_code', 'staff code', 'code'].includes(norm(h).replace(/_/g, ' ')));
       const daysHeader = headers.find(h => ['so ngay cong', 'ngay cong', 'workday count', 'workdays', 'days'].includes(norm(h)));
-      if (!positionHeader || !daysHeader) throw new Error('File cần có hai cột: Vị trí (hoặc Chức danh) và Số ngày công.');
-      const seen = new Set(); const valid = []; const errors = [];
-      data.forEach((r, i) => { const position = String(r[positionHeader] || '').trim(); const days = parseNumber(r[daysHeader]); if (!position) errors.push(`Dòng ${i + 2}: thiếu vị trí.`); else if (days === null || !Number.isFinite(days) || days <= 0) errors.push(`Dòng ${i + 2}: số ngày công phải lớn hơn 0.`); else if (seen.has(norm(position))) errors.push(`Dòng ${i + 2}: vị trí trùng “${position}”.`); else { seen.add(norm(position)); valid.push({ position_name: position, position_key: norm(position), workday_count: days, policy_version_id: policyId }); } });
+      if (!codeHeader || !daysHeader) throw new Error('File cần có hai cột: Mã Nhân Viên và Số ngày công. Hệ thống sẽ tra vị trí từ Nhân Sự Master theo mã nhân viên.');
       if (!policyId) throw new Error('Vui lòng chọn Chính Sách Lương trước khi Import.');
-      if (errors.length) { setImportSummary({ errors, validCount: valid.length, total: data.length }); if (!valid.length) throw new Error(errors.slice(0, 5).join(' ')); }
-      const confirmed = window.confirm(`Xác nhận Import định mức ngày công cho chính sách ${getPolicyCode(policies.find(p => p.id === policyId))}?\n\nSố vị trí hợp lệ: ${valid.length}\nDòng lỗi: ${errors.length}\nCác vị trí hợp lệ trong file sẽ được thêm/cập nhật; vị trí không có trong file được giữ nguyên.`);
+      const employeeByCode = new Map();
+      employees.forEach(e => { const code = String(getCode(e) || '').trim().toUpperCase(); if (code && code !== '—') employeeByCode.set(code, e); });
+      const seenCodes = new Set(); const byPosition = new Map(); const errors = []; let matchedEmployees = 0;
+      data.forEach((r, i) => {
+        const code = String(r[codeHeader] ?? '').trim().toUpperCase();
+        const days = parseNumber(r[daysHeader]);
+        if (!code) { errors.push(`Dòng ${i + 2}: thiếu Mã Nhân Viên.`); return; }
+        if (seenCodes.has(code)) { errors.push(`Dòng ${i + 2}: Mã Nhân Viên ${code} bị trùng.`); return; }
+        seenCodes.add(code);
+        const employee = employeeByCode.get(code);
+        if (!employee) { errors.push(`Dòng ${i + 2}: không tìm thấy Mã Nhân Viên ${code} trong Nhân Sự Master.`); return; }
+        const position = getEmployeePosition(employee);
+        if (!position) { errors.push(`Dòng ${i + 2}: nhân sự ${code} chưa có Vị trí/Chức danh trong Nhân Sự Master.`); return; }
+        if (days === null || !Number.isFinite(days) || days <= 0) { errors.push(`Dòng ${i + 2}: số ngày công phải lớn hơn 0.`); return; }
+        matchedEmployees++;
+        const key = norm(position); const existing = byPosition.get(key);
+        if (existing && Number(existing.workday_count) !== Number(days)) {
+          errors.push(`Dòng ${i + 2}: vị trí “${position}” có số ngày công không thống nhất (${existing.workday_count} và ${days}).`); return;
+        }
+        if (!existing) byPosition.set(key, { position_name: position, position_key: key, workday_count: days, policy_version_id: policyId });
+      });
+      const valid = [...byPosition.values()];
+      if (errors.length) setImportSummary({ errors, validCount: valid.length, total: data.length, matchedEmployees });
+      if (!valid.length) throw new Error(errors.slice(0, 5).join(' ') || 'Không có dòng hợp lệ để Import.');
+      const confirmed = window.confirm(`Xác nhận Import định mức ngày công cho chính sách ${getPolicyCode(policies.find(p => p.id === policyId))}?\n\nMã nhân viên đối chiếu: ${matchedEmployees}\nVị trí hợp lệ để lưu: ${valid.length}\nDòng lỗi: ${errors.length}\n\nVị trí được lấy từ Nhân Sự Master theo Mã Nhân Viên. Các vị trí không có trong file sẽ được giữ nguyên.`);
       if (!confirmed) return;
       setBusy(true);
       const { error } = await supabase.from('salary_workday_norms').upsert(valid, { onConflict: 'policy_version_id,position_key' }); if (error) throw error;
-      await load(); setImportSummary({ errors, validCount: valid.length, total: data.length, saved: valid.length }); setMessage({ type: errors.length ? 'warning' : 'success', text: `Import thành công ${valid.length} vị trí; ${errors.length} dòng cần kiểm tra.` });
+      await load(); setImportSummary({ errors, validCount: valid.length, total: data.length, saved: valid.length, matchedEmployees }); setMessage({ type: errors.length ? 'warning' : 'success', text: `Import thành công ${valid.length} vị trí từ ${matchedEmployees} mã nhân viên; ${errors.length} dòng cần kiểm tra.` });
     } catch (e) { setMessage({ type: 'error', text: `Không Import được: ${e.message || e}` }); }
     finally { setBusy(false); }
   }
+  function downloadTemplate() { downloadCsv('template-dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Số ngày công'], ['VA001', '26'], ['VA002', '26']]); }
+  function exportRows() { downloadCsv('dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Họ và Tên', 'Vị trí', 'Chính Sách Lương', 'Số ngày công', 'Lương/ngày Công', 'Đơn giá Giờ', 'Đơn giá Phút', 'Trạng thái'], ...rows.map(r => [r.code, r.name, r.position, getPolicyCode(policies.find(p => p.id === policyId)), r.workdayNorm?.workday_count ?? '', r.daily ?? '', r.hourly ?? '', r.minute ?? '', r.daily === null ? `Thiếu dữ liệu: ${[...r.missing, !r.workdayNorm ? 'Định mức ngày công' : ''].filter(Boolean).join(', ')}` : 'Đủ dữ liệu'])]); }
+
   function downloadTemplate() { downloadCsv('template-dinh-muc-ngay-cong.csv', [['Vị trí', 'Số ngày công'], ['Giáo viên', '26'], ['Văn Phòng', '26']]); }
   function exportRows() { downloadCsv('dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Họ và Tên', 'Vị trí', 'Chính Sách Lương', 'Số ngày công', 'Lương Cơ Bản', 'Thâm Niên', 'Thâm Niên 2026', 'Phụ Cấp', 'Tổng lương cố định', 'Lương/ngày Công', 'Trạng thái'], ...rows.map(r => [r.code, r.name, r.position, getPolicyCode(policies.find(p => p.id === policyId)), r.workdayNorm?.workday_count ?? '', ...r.components.map(c => c.value ?? ''), r.total ?? '', r.daily ?? '', r.daily === null ? `Thiếu dữ liệu: ${[...r.missing, !r.workdayNorm ? 'Định mức ngày công' : ''].filter(Boolean).join(', ')}` : 'Đủ dữ liệu'])]); }
 
@@ -99,8 +124,8 @@ export default function Page() {
     </div>
     {message && <div className={`wn-message ${message.type}`}><AlertCircle size={16}/><span>{message.text}</span></div>}
     {importSummary?.errors?.length > 0 && <details className="wn-errors"><summary>Xem {importSummary.errors.length} dòng cần kiểm tra</summary><ul>{importSummary.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></details>}
-    <div className="wn-formula"><strong>Công thức:</strong> (Lương Cơ Bản + Thâm Niên + Thâm Niên 2026 + Phụ Cấp) ÷ Số ngày công tương ứng. <span>Chỉ tính khi đủ dữ liệu và số ngày công lớn hơn 0.</span></div>
-    <div className="wn-table-wrap"><table className="wn-table"><thead><tr><th>Mã Nhân Viên</th><th>Họ và Tên</th><th>Vị trí</th><th>Số ngày công</th><th>Lương Cơ Bản</th><th>Thâm Niên</th><th>Thâm Niên 2026</th><th>Phụ Cấp</th><th>Tổng lương cố định</th><th>Lương/ngày Công</th></tr></thead><tbody>{rows.map(r => <tr key={r.employee.id}><td className="wn-code">{r.code}</td><td><strong>{r.name}</strong><small>{r.employee.employee_group || r.employee.custom_fields?.employee_group || r.employee['Nhóm'] || ''}</small></td><td>{r.position || '—'}</td><td>{r.workdayNorm ? money(r.days) : <span className="wn-missing">Chưa cấu hình</span>}</td>{r.components.map(c => <td key={c.code}>{c.value === undefined || c.value === null || c.value === '' ? '—' : money(c.value)}</td>)}<td>{r.total === null ? '—' : money(r.total)}</td><td className={r.daily === null ? 'wn-no-result' : 'wn-daily'}>{r.daily === null ? <span title={[...r.missing, !r.workdayNorm ? 'Chưa có định mức ngày công' : ''].filter(Boolean).join(', ')}>Thiếu dữ liệu</span> : money(r.daily)}</td></tr>)}{!rows.length && <tr><td colSpan={10} className="wn-empty">{loading ? 'Đang tải dữ liệu...' : 'Không có dữ liệu phù hợp.'}</td></tr>}</tbody></table></div>
-    <div className="wn-footer">Hiển thị {rows.length}/{employees.length} nhân sự · Lương/ngày Công chỉ là kết quả tham chiếu; không tự thay đổi các thành phần lương gốc hoặc công thức tính lương.</div>
+    <div className="wn-formula"><strong>Công thức:</strong> Lương/ngày Công = tổng 4 thành phần lương cố định lấy từ Định Mức Lương ÷ Số ngày công; Đơn giá Giờ = Lương/ngày Công ÷ 8; Đơn giá Phút = Đơn giá Giờ ÷ 60. <span>Các thành phần lương được lấy ngầm từ Định Mức Lương, không hiển thị thành cột riêng.</span></div>
+    <div className="wn-table-wrap"><table className="wn-table"><thead><tr><th>Mã Nhân Viên</th><th>Họ và Tên</th><th>Vị trí</th><th>Số ngày công</th><th>Lương/ngày Công</th><th>Đơn giá Giờ</th><th>Đơn giá Phút</th></tr></thead><tbody>{rows.map(r => <tr key={r.employee.id}><td className="wn-code">{r.code}</td><td><strong>{r.name}</strong><small>{r.employee.employee_group || r.employee.custom_fields?.employee_group || r.employee['Nhóm'] || ''}</small></td><td>{r.position || '—'}</td><td>{r.workdayNorm ? money(r.days) : <span className="wn-missing">Chưa cấu hình</span>}</td><td className={r.daily === null ? 'wn-no-result' : 'wn-daily'}>{r.daily === null ? <span title={[...r.missing, !r.workdayNorm ? 'Chưa có định mức ngày công' : ''].filter(Boolean).join(', ')}>Thiếu dữ liệu</span> : money(r.daily)}</td><td className={r.hourly === null ? 'wn-no-result' : 'wn-daily'}>{r.hourly === null ? '—' : money(r.hourly)}</td><td className={r.minute === null ? 'wn-no-result' : 'wn-daily'}>{r.minute === null ? '—' : money(r.minute)}</td></tr>)}{!rows.length && <tr><td colSpan={7} className="wn-empty">{loading ? 'Đang tải dữ liệu...' : 'Không có dữ liệu phù hợp.'}</td>}</tbody></table></div>
+    <div className="wn-footer">Hiển thị {rows.length}/{employees.length} nhân sự · Lương/ngày Công, Đơn giá Giờ và Đơn giá Phút là kết quả tính toán tham chiếu; không tự thay đổi các thành phần lương gốc hoặc công thức tính lương.</div>
   </section>;
 }
