@@ -25,7 +25,7 @@ const IMPORT_HEADER_MAP = {
   'mst / cccd': 'tax_code', 'mst/cccd': 'tax_code', 'mã số thuế / cccd': 'tax_code', 'mã số thuế': 'tax_code', 'cccd': 'tax_code',
   'phân loại': 'employment_type', 'phan loai': 'employment_type', 'nhóm': 'employee_group', 'nhom': 'employee_group',
   'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'job_title': 'position',
-  'bộ phận': 'department_name', 'bo phan': 'department_name', 'phòng ban': 'department_name', 'phong ban': 'department_name',
+  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department',
   'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status',
   'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date',
   'tham gia bhxh': 'social_insurance', 'bhxh': 'social_insurance', 'người phụ thuộc': 'dependents_count', 'nguoi phu thuoc': 'dependents_count',
