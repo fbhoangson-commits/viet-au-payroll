@@ -20,17 +20,14 @@ const LABELS = {
 // Explicit import-header mapping is required even when employees is empty.
 // Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
 const IMPORT_HEADER_MAP = {
-  'mã nhân viên': 'employee_code', 'ma nhan vien': 'employee_code', 'employee_code': 'employee_code',
-  'họ và tên': 'full_name', 'họ và tên nhân viên': 'full_name', 'ho va ten': 'full_name', 'full_name': 'full_name',
-  'mst / cccd': 'tax_code', 'mst/cccd': 'tax_code', 'mã số thuế / cccd': 'tax_code', 'mã số thuế': 'tax_code', 'cccd': 'tax_code',
-  'phân loại': 'employment_type', 'phan loai': 'employment_type', 'nhóm': 'employee_group', 'nhom': 'employee_group',
-  'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'job_title': 'position',
-  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department',
+  'mã nhân viên': 'employee_code', 'ma nhan vien': 'employee_code', 'employee_code': 'employee_code', 'mã nv': 'employee_code', 'mnv': 'employee_code',
+  'họ và tên': 'full_name', 'họ và tên nhân viên': 'full_name', 'ho va ten': 'full_name', 'full_name': 'full_name', 'họ tên': 'full_name', 'ho ten': 'full_name',
   'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status',
-  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date',
-  'tham gia bhxh': 'social_insurance', 'bhxh': 'social_insurance', 'người phụ thuộc': 'dependents_count', 'nguoi phu thuoc': 'dependents_count',
-  'email': 'email', 'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes',
-  'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone'
+  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department',
+  'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'position': 'position', 'job_title': 'job_title',
+  'email': 'email', 'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone',
+  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngày nghỉ việc': 'end_date',
+  'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes'
 };
 const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
 const mapImportHeader = header => {
@@ -52,9 +49,55 @@ const norm = v => String(v ?? '').trim();
 const isInactive = row => /nghỉ|inactive|terminated|resigned|đã nghỉ/i.test(String(row.status ?? row.employment_status ?? ''));
 const displayName = row => row.full_name || row.name || row.employee_name || row.employee_code || 'Chưa có tên';
 const isInternalKey = k => ['id','created_at','updated_at'].includes(k);
+const isSchemaCacheColumnError = error => /could not find the .* column of 'employees' in the schema cache/i.test(String(error?.message || ''));
+const getMissingColumn = error => {
+  const match = String(error?.message || '').match(/could not find the ['"](.+?)['"] column of 'employees' in the schema cache/i);
+  return match?.[1] || null;
+};
+const expandEmployee = row => ({ ...row, ...(row?.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields : {}) });
+const customFieldOrderOf = row => Array.isArray(row?.custom_field_order) ? row.custom_field_order : [];
+const valueForField = (row, key) => Object.prototype.hasOwnProperty.call(row || {}, key) ? row[key] : row?.custom_fields?.[key];
+const buildEmployeePayload = (input, previous = null) => {
+  const source = { ...input };
+  const customFields = { ...(previous?.custom_fields && typeof previous.custom_fields === 'object' ? previous.custom_fields : {}) };
+  const customOrder = [...(Array.isArray(previous?.custom_field_order) ? previous.custom_field_order : [])];
+  const dbKeys = new Set(['id','employee_code','full_name','name','status','department','position','job_title','email','phone','phone_number','gender','date_of_birth','start_date','hire_date','end_date','address','notes','created_at','updated_at','custom_fields','custom_field_order']);
+  for (const [key, value] of Object.entries(source)) {
+    if (['id','created_at','updated_at','custom_fields','custom_field_order'].includes(key)) continue;
+    if (!dbKeys.has(key)) {
+      if (value !== undefined && value !== null && String(value).trim() !== '') customFields[key] = value;
+      delete source[key];
+      if (!customOrder.includes(key)) customOrder.push(key);
+    }
+  }
+  source.custom_fields = customFields;
+  source.custom_field_order = customOrder;
+  return source;
+};
+
+async function saveWithSchemaFallback(payload, id = null) {
+  let candidate = { ...payload };
+  let customFields = { ...(candidate.custom_fields || {}) };
+  let customOrder = Array.isArray(candidate.custom_field_order) ? [...candidate.custom_field_order] : [];
+  // Retry only when PostgREST explicitly reports a missing column. Preserve that field as dynamic JSON data.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      return await saveEmployee({ ...candidate, custom_fields: customFields, custom_field_order: customOrder }, id);
+    } catch (error) {
+      const missing = getMissingColumn(error);
+      if (!missing || !Object.prototype.hasOwnProperty.call(candidate, missing) || ['custom_fields','custom_field_order'].includes(missing)) throw error;
+      const value = candidate[missing];
+      if (value !== undefined && value !== null && String(value).trim() !== '') customFields[missing] = value;
+      if (!customOrder.includes(missing)) customOrder.push(missing);
+      delete candidate[missing];
+    }
+  }
+  throw new Error('Không thể ánh xạ các trường import sau nhiều lần thử. Kiểm tra schema employees.');
+}
+
 
 function downloadWorkbook(rows, fileName = 'Nhan-su-Master.xlsx') {
-  const data = rows.map(row => Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'id')));
+  const data = rows.map(row => { const custom = row.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields : {}; const order = Array.isArray(row.custom_field_order) ? row.custom_field_order : Object.keys(custom); const base = Object.fromEntries(Object.entries(row).filter(([k]) => !['id','custom_fields','custom_field_order'].includes(k))); const flattened = { ...base }; for (const key of order) if (Object.prototype.hasOwnProperty.call(custom, key)) flattened[key] = custom[key]; for (const [key, value] of Object.entries(custom)) if (!Object.prototype.hasOwnProperty.call(flattened, key)) flattened[key] = value; return flattened; });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'NhanSu');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -63,6 +106,7 @@ function downloadWorkbook(rows, fileName = 'Nhan-su-Master.xlsx') {
     ['2. employee_code / Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
     ['3. Dòng có mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
     ['4. Cột không có trong file sẽ không bị cập nhật.'],
+    ['5. Có thể thêm Header mới; Header mới được lưu dưới dạng trường mở rộng theo đúng thứ tự file.'],
     ['5. Ô trống được bỏ qua khi cập nhật hồ sơ hiện có.'],
     ['6. Không xóa nhân sự bằng cách bỏ dòng khỏi file.']
   ]), 'HuongDan');
@@ -93,7 +137,7 @@ export default function Page() {
     setLoading(true); setError('');
     try {
       const [rows, userProfile] = await Promise.all([fetchEmployees(), getCurrentUserProfile()]);
-      setEmployees(rows);
+      setEmployees(rows.map(expandEmployee));
       setProfile(userProfile);
     } catch (e) {
       setError(e?.message || 'Không thể tải danh sách nhân sự.');
@@ -102,9 +146,12 @@ export default function Page() {
   useEffect(() => { reload(); }, []);
 
   const fields = useMemo(() => {
-    const keys = new Set(employees.flatMap(row => Object.keys(row)));
+    const importedOrder = employees.flatMap(row => customFieldOrderOf(row));
+    const keys = new Set(employees.flatMap(row => Object.keys(row).filter(k => !['custom_fields','custom_field_order'].includes(k))));
     DEFAULT_FIELDS.forEach(f => { if (!keys.size || keys.has(f.key)) keys.add(f.key); });
-    return [...keys].filter(k => !['id'].includes(k)).map(key => ({ key, label: labelFor(key) }));
+    const ordered = [...new Set(importedOrder)].filter(k => keys.has(k));
+    const rest = [...keys].filter(k => !ordered.includes(k));
+    return [...ordered, ...rest].filter(k => !['id'].includes(k)).map(key => ({ key, label: labelFor(key) }));
   }, [employees]);
 
   const filtered = useMemo(() => employees.filter(row => {
@@ -130,7 +177,7 @@ export default function Page() {
     DEFAULT_FIELDS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
     setSelected(null); setForm(initial); setEditing(true); setShowForm(true); setError(''); setNotice(null);
   }
-  function openDetails(row) { setSelected(row); setForm({ ...row }); setEditing(false); setShowForm(true); setError(''); }
+  function openDetails(row) { setSelected(row); setForm(expandEmployee(row)); setEditing(false); setShowForm(true); setError(''); }
   function updateForm(key, value) { setForm(old => ({ ...old, [key]: value })); }
 
   async function save() {
@@ -141,9 +188,8 @@ export default function Page() {
     if (nameKey && !norm(form[nameKey])) { setError('Vui lòng nhập Họ và Tên.'); return; }
     setSaving(true);
     try {
-      const payload = {};
-      Object.entries(form).forEach(([k,v]) => { if (k !== 'id' && k !== 'created_at' && k !== 'updated_at') payload[k] = v; });
-      const saved = await saveEmployee(payload, selected?.id || null);
+      const payload = buildEmployeePayload(form, selected);
+      const saved = await saveWithSchemaFallback(payload, selected?.id || null);
       setNotice({ type: 'success', text: selected ? 'Đã cập nhật hồ sơ nhân sự.' : 'Đã tạo hồ sơ nhân sự.' });
       setShowForm(false); setSelected(saved); await reload();
     } catch (e) { setError(e?.message || 'Không thể lưu hồ sơ. Kiểm tra schema và quyền RLS.'); }
@@ -182,35 +228,31 @@ export default function Page() {
       for (let i = 0; i < importPreview.rows.length; i++) {
         const raw = importPreview.rows[i];
         const normalized = {};
+        const dynamicFields = {};
+        const importedOrder = [];
         for (const [header, value] of Object.entries(raw)) {
-          // Blank cells and absent Headers must never erase existing values.
+          // Missing columns and blank cells never erase existing data.
           if (value === null || value === undefined || String(value).trim() === '') continue;
-          const headerKey = normalizeHeader(header);
-          const existingField = current.length
-            ? Object.keys(current[0]).find(k => k === header || normalizeHeader(labelFor(k)) === headerKey)
-            : null;
-          // Resolve from the explicit map first: an empty employees table cannot
-          // be used to infer its column names from a current row.
-          const key = mapImportHeader(header) || existingField;
-          if (!key) {
-            // Do not submit arbitrary spreadsheet Header names as SQL columns.
-            // Surface unsupported Headers as row errors instead of failing every row
-            // with PostgREST's schema-cache error.
-            failed.push({ row: i+2, code: norm(raw[importPreview.codeHeader]), message: `Header chưa được ánh xạ: ${header}` });
-            continue;
-          }
-          if (key === 'id' || ['created_at','updated_at'].includes(key)) continue;
-          normalized[key] = value instanceof Date ? value.toISOString() : value;
+          const key = mapImportHeader(header);
+          const converted = value instanceof Date ? value.toISOString() : value;
+          if (key && !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(key)) normalized[key] = converted;
+          else dynamicFields[header] = converted;
+          importedOrder.push(key || header);
         }
         const code = norm(normalized.employee_code || raw[importPreview.codeHeader]);
         normalized.employee_code = code;
         const existing = byCode.get(code);
         try {
+          const previous = existing || null;
+          const mergedCustom = { ...(previous?.custom_fields && typeof previous.custom_fields === 'object' ? previous.custom_fields : {}) };
+          Object.assign(mergedCustom, dynamicFields);
+          // Header order from the workbook is authoritative for dynamic fields.
+          const payload = buildEmployeePayload({ ...normalized, custom_fields: mergedCustom, custom_field_order: importedOrder }, previous);
           if (existing) {
-            const payload = { ...normalized }; delete payload.employee_code; // protect stable identity key on update
-            if (Object.keys(payload).length) { await saveEmployee(payload, existing.id); updated++; }
+            delete payload.employee_code; // protect stable identity key on update
+            await saveWithSchemaFallback(payload, existing.id); updated++;
           } else {
-            await saveEmployee(normalized); created++;
+            await saveWithSchemaFallback(payload); created++;
           }
         } catch (e) { failed.push({ row: i+2, code, message: e.message }); }
       }
@@ -250,8 +292,8 @@ export default function Page() {
       <button className="em-icon-btn" title="Tải lại dữ liệu" onClick={reload}><RefreshCw size={17}/></button>
     </div>
     <div className="em-table-wrap">
-      <table className="em-table"><thead><tr><th>MÃ NHÂN VIÊN</th><th>HỌ VÀ TÊN</th><th>PHÒNG BAN</th><th>CHỨC VỤ</th><th>LIÊN HỆ</th><th>TRẠNG THÁI</th><th></th></tr></thead>
-      <tbody>{loading ? <tr><td colSpan="7" className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan="7" className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan="7" className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}><td><span className="em-code">{row.employee_code || '—'}</span></td><td><button className="em-name" onClick={()=>openDetails(row)}>{displayName(row)}</button><small className="em-sub">{row.email || ''}</small></td><td>{row.department || row.department_name || '—'}</td><td>{row.position || row.job_title || '—'}</td><td>{row.phone || row.phone_number || '—'}</td><td><span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{row.status || row.employment_status || 'Đang làm việc'}</span></td><td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
+      <table className="em-table"><thead><tr>{fields.filter(f => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key)).map(f=><th key={f.key}>{f.label.toLocaleUpperCase('vi')}</th>)}<th></th></tr></thead>
+      <tbody>{loading ? <tr><td colSpan={fields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={fields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={fields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{fields.filter(f => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key)).map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
       <div className="em-table-footer"><span>{filtered.length} hồ sơ · Trang {Math.min(page,pages)} / {pages}</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft size={16}/></button><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight size={16}/></button></div></div>
     </div>
     <div className="em-permission-note"><ShieldAlert size={15}/><span>Quyền đọc/ghi được kiểm soát bởi phiên đăng nhập và chính sách RLS của Supabase. Hồ sơ tài khoản: {profile?.appUser ? 'đã tìm thấy trong app_users' : 'chưa xác minh được ánh xạ app_users; thao tác sẽ tuân theo RLS'}.</span></div>
@@ -261,7 +303,7 @@ export default function Page() {
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
       <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/> : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
-      <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm({...selected});setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
+      <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
     </section></div>}
 
     {importPreview && <div className="em-modal-backdrop"><section className="em-modal em-import-modal"><header><div><small>IMPORT EXCEL</small><h3>Xem trước dữ liệu</h3><p>{importPreview.fileName} · {importPreview.rows.length} dòng</p></div><button className="em-icon-btn" onClick={()=>setImportPreview(null)}><X size={18}/></button></header>
