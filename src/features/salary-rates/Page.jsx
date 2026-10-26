@@ -71,43 +71,55 @@ function SalaryRatesModule({supabase,employees=[],policies=[],notify=()=>{}}){
    if(isExcel){const workbook=XLSX.read(await file.arrayBuffer(),{type:'array'});rows=XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]],{header:1,raw:false,defval:''});}
    else rows=parseCsv((await file.text()).replace(/^\uFEFF/,''));
    if(rows.length<2)throw new Error('File không có dữ liệu.');
-   const headers=rows[0].map(x=>x.trim());
-   const headerKey=x=>norm(x).replace(/[._-]/g,' ').replace(/\s+/g,' ').trim();
-   const codeIndex=headers.findIndex(x=>['ma nhan vien','mnv','ma nv','employee code','employee id'].includes(headerKey(x)));
+   const headerKey=x=>norm(String(x??'').replace(/^\uFEFF/,'')).replace(/[._-]/g,' ').replace(/\s+/g,' ').trim();
+   const headers=rows[0].map(x=>String(x??'').trim());
+   const codeIndex=headers.findIndex(x=>['ma nhan vien','mnv','ma nv','employee code','employee id','ma nhan su'].includes(headerKey(x)));
    if(codeIndex<0)throw new Error('Thiếu cột bắt buộc “Mã nhân viên”.');
-   const fieldIndexes=groupFields.map(f=>({field:f,index:headers.findIndex(h=>headerKey(h)===headerKey(f.name))})).filter(x=>x.index>=0);
+   const fieldIndexes=groupFields.map(f=>({field:f,index:headers.findIndex(h=>headerKey(h)===headerKey(f.name)||headerKey(h)===headerKey(f.code))})).filter(x=>x.index>=0);
    if(!fieldIndexes.length)throw new Error('Không tìm thấy cột thành phần của nhóm đang chọn. Hãy tải template mới.');
-   const parsed=[],issues=[];let unknown=0;
+   const employeeCode=e=>e?.id??e?.employee_code??e?.employeeCode??e?.code??e?.ma_nhan_vien??e?.custom_fields?.employee_code??'';
+   const employeeUuid=e=>e?.supabaseId??e?.supabase_id??e?.employee_uuid??e?.uuid??(typeof e?.id==='string'&&/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(e.id)?e.id:null);
+   const employeeIndex=new Map();
+   employees.forEach(e=>{const code=employeeCode(e);if(code)employeeIndex.set(norm(code),e);});
+   const parsed=[],issues=[],unknownCodes=[];let emptyRows=0;
    for(let ri=1;ri<rows.length;ri++){
-    const cells=rows[ri],code=(cells[codeIndex]||'').trim();if(!code)continue;
-    const employee=employees.find(e=>norm(e.id)===norm(code));
-    if(!employee?.supabaseId){unknown++;continue;}
+    const cells=rows[ri]||[],code=String(cells[codeIndex]??'').trim();
+    if(!code){if(cells.some(c=>String(c??'').trim()!==''))emptyRows++;continue;}
+    const employee=employeeIndex.get(norm(code));
+    if(!employee||!employeeUuid(employee)){unknownCodes.push(code);continue;}
     const vals={};
     for(const {field,index} of fieldIndexes){
-      const raw=(cells[index]??'').trim();
-      
+      const raw=String(cells[index]??'').trim();
       if(raw===''){vals[field.id]=null;continue;}
+      if(field.field_type==='text'){vals[field.id]=raw;continue;}
       const n=parseLocalizedNumber(raw);
       if(!n.valid){issues.push(`Dòng ${ri+1}, ${code}, cột ${field.name}: “${raw}” không phải số hợp lệ.`);continue;}
       vals[field.id]=n.value;
     }
-    parsed.push({employee,vals,code});
+    parsed.push({employee,employeeId:employeeUuid(employee),vals,code,row:ri+1});
    }
-   if(issues.length)throw new Error(issues.slice(0,5).join(' ') + (issues.length>5?` Còn ${issues.length-5} lỗi khác.`:''));
+   if(issues.length)throw new Error(issues.slice(0,8).join(' ') + (issues.length>8?` Còn ${issues.length-8} lỗi khác.`:''));
    if(!policyId)throw new Error('Vui lòng chọn phiên bản chính sách trước khi Import.');
-   if(!parsed.length)throw new Error('Không có mã nhân viên hợp lệ để nhập.');
-   const duplicate=parsed.map(x=>x.code.toLowerCase()).filter((x,i,a)=>a.indexOf(x)!==i);
+   if(!parsed.length)throw new Error(`Không có nhân sự hợp lệ để nhập. Mã không khớp Master/thiếu UUID: ${unknownCodes.slice(0,10).join(', ')||'không có'}${unknownCodes.length>10?'…':''}`);
+   const duplicate=parsed.map(x=>norm(x.code)).filter((x,i,a)=>a.indexOf(x)!==i);
    if(duplicate.length)throw new Error(`File có mã nhân viên trùng: ${[...new Set(duplicate)].join(', ')}. Hãy sửa file rồi nhập lại.`);
-   const confirmText=`Xác nhận thay thế định mức nhóm “${currentGroup?.name||''}”, phiên bản ${policies.find(p=>p.id===policyId)?.code||''}?\\n\\nSố nhân viên cập nhật: ${parsed.length}\\nMã không tìm thấy/bỏ qua: ${unknown}\\nCác cột có trong file sẽ được thay thế theo Mã Nhân Viên; ô trống sẽ xóa giá trị cũ của cột đó. Nhân viên không có trong file được giữ nguyên.`;
+   const confirmText=`Xác nhận nhập định mức nhóm “${currentGroup?.name||''}”, phiên bản ${policies.find(p=>p.id===policyId)?.code||''}?\n\nSố nhân sự hợp lệ: ${parsed.length}\nMã không tìm thấy/thiếu UUID: ${unknownCodes.length}\nCác cột có trong file sẽ được cập nhật theo Mã Nhân Viên; ô trống sẽ xóa giá trị cũ của cột tương ứng. Nhân viên không có trong file được giữ nguyên.\n\nTiếp tục?`;
    if(!confirm(confirmText))return;
+   let success=0;const failed=[];
    for(const item of parsed){
-    const old=values.find(v=>v.employee_id===item.employee.supabaseId&&v.group_id===groupId&&v.policy_version_id===policyId);
-    const next={...(old?.values||{})};
-    fieldIndexes.forEach(({field})=>{if(Object.prototype.hasOwnProperty.call(item.vals,field.id)){if(item.vals[field.id]===null)delete next[field.id];else next[field.id]=item.vals[field.id];}});
-    const payload={employee_id:item.employee.supabaseId,group_id:groupId,policy_version_id:policyId,values:next,updated_at:new Date().toISOString()};
-    const {error}=await supabase.from('salary_rate_values').upsert(payload,{onConflict:'employee_id,group_id,policy_version_id'});if(error)throw error;
+    try{
+     const old=values.find(v=>v.employee_id===item.employeeId&&v.group_id===groupId&&v.policy_version_id===policyId);
+     const next={...(old?.values||{})};
+     fieldIndexes.forEach(({field})=>{if(Object.prototype.hasOwnProperty.call(item.vals,field.id)){if(item.vals[field.id]===null)delete next[field.id];else next[field.id]=item.vals[field.id];}});
+     const payload={employee_id:item.employeeId,group_id:groupId,policy_version_id:policyId,values:next,updated_at:new Date().toISOString()};
+     const {error}=await supabase.from('salary_rate_values').upsert(payload,{onConflict:'employee_id,group_id,policy_version_id'});
+     if(error)throw error;
+     success++;
+    }catch(e){failed.push(`${item.code} (dòng ${item.row}): ${e.message||e.code||'Lỗi không xác định'}`);}
    }
-   await load();notify(`Import hoàn tất: cập nhật ${parsed.length} nhân viên; bỏ qua ${unknown} mã không tìm thấy.`);
+   await load();
+   const summary=`Import xong: thành công ${success}/${parsed.length} nhân sự. Bỏ qua ${unknownCodes.length} mã không tìm thấy/thiếu UUID.${emptyRows?` Bỏ qua ${emptyRows} dòng không có mã nhân viên.`:''}${failed.length?`\nLỗi ${failed.length} dòng:\n${failed.slice(0,8).join('\n')}${failed.length>8?`\nCòn ${failed.length-8} lỗi khác.`:''}`:''}`;
+   notify(summary);
   }catch(e){notify(`Không nhập được file: ${e.message||e}`)}
  }
  return <section className="panel salary-rates-module"><div className="section-intro"><div><h3>Định mức lương</h3><p>Danh sách nhân viên luôn là nền tảng. Chọn nhóm để hiển thị các cột thành phần tương ứng.</p></div><div className="salary-rate-actions"><button className="btn btn-secondary" onClick={downloadTemplate}><FileSpreadsheet size={14}/> Tải template</button><label className="btn btn-secondary salary-rate-file-button"><Upload size={14}/> Import<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={e=>{importCsv(e.target.files?.[0]);e.target.value='';}}/></label><button className="btn btn-secondary" onClick={exportCurrent}><Download size={14}/> Export</button><button className="btn btn-secondary" onClick={load}><RefreshCw size={14}/> Làm mới</button><button className="btn btn-secondary" onClick={()=>setConfig(v=>!v)}><Settings2 size={14}/> Cấu hình nhóm & cột</button></div></div>
