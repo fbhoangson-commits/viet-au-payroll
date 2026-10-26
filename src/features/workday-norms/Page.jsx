@@ -44,7 +44,7 @@ export default function Page() {
         fetchEmployees(),
         supabase.from('salary_policy_versions').select('id,code,name,status,effective_from,effective_to').order('effective_from', { ascending: false }),
         supabase.from('salary_workday_norms').select('*').order('created_at', { ascending: false }),
-        supabase.from('salary_rate_fields').select('*').order('sort_order').order('name'),
+        supabase.from('salary_rate_columns').select('*').eq('is_active', true).order('display_order').order('name'),
         supabase.from('salary_rate_values').select('*'),
         supabase.from('salary_rate_groups').select('*'),
       ]);
