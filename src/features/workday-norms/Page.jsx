@@ -15,7 +15,7 @@ const norm = (v) => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,
 const getPosition = (e) => e.position || e.job_title || e.role || e.chuc_danh || e['Chức danh'] || e['Chức vụ'] || e.custom_fields?.position || e.custom_fields?.job_title || '';
 const getName = (e) => e.full_name || e.name || e.employee_name || '—';
 const getCode = (e) => e.employee_code || e.code || e.id || '—';
-const money = (n) => Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+const money = (n) => Number.isFinite(Number(n)) ? Math.round(Number(n)).toLocaleString('vi-VN', { maximumFractionDigits: 0 }) : '—';
 const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 function downloadCsv(name, rows) { const csv = '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'); const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
 function parseNumber(raw) { const s = String(raw ?? '').trim().replace(/[\s₫đĐ]/g, ''); if (!s) return null; if (!/^[+-]?[\d.,]+$/.test(s)) return NaN; let t = s; if (s.includes(',') && s.includes('.')) t = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, ''); else if (s.includes(',') || s.includes('.')) { const sep = s.includes(',') ? ',' : '.'; const parts = s.split(sep); t = parts.length === 2 && parts[1].length !== 3 ? parts.join('.') : parts.join(''); } const n = Number(t); return Number.isFinite(n) ? n : NaN; }
@@ -65,8 +65,16 @@ export default function Page() {
     const position = getEmployeePosition(e); const workdayNorm = normByEmployee.get(String(e.id)) || normByEmployee.get(String(e.supabase_id || '')); const stored = rateMap.get(e.id) || rateMap.get(e.supabase_id);
     const values = stored?.values || {}; const components = fixedFieldMap.map(c => ({ ...c, value: getRateValue(values, c.field, c) }));
     const missing = components.filter(c => c.value === undefined || c.value === null || c.value === '').map(c => c.labels[0]);
-    const days = Number(workdayNorm?.workday_count); const total = components.every(c => c.value !== undefined && c.value !== null && c.value !== '') ? components.reduce((sum, c) => sum + Number(c.value), 0) : null;
-    const daily = total !== null && Number.isFinite(days) && days > 0 ? total / days : null; const hourly = daily === null ? null : daily / 8; const minute = hourly === null ? null : hourly / 60;
+    const days = Number(workdayNorm?.workday_count);
+    // Cộng các thành phần lương có giá trị hợp lệ; thành phần trống/thiếu không chặn phép tính.
+    // parseNumber hỗ trợ số dạng Việt Nam như 5.000.000 hoặc 1.250,50.
+    const availableAmounts = components
+      .map(c => parseNumber(c.value))
+      .filter(n => n !== null && Number.isFinite(n));
+    const total = availableAmounts.length ? availableAmounts.reduce((sum, n) => sum + n, 0) : null;
+    const daily = total !== null && Number.isFinite(days) && days > 0 ? total / days : null;
+    const hourly = daily === null ? null : daily / 8;
+    const minute = hourly === null ? null : hourly / 60;
     return { employee: e, code: getCode(e), name: getName(e), position, workdayNorm, days, components, total, daily, hourly, minute, missing };
   }).filter(r => !search || norm([r.code, r.name, r.position].join(' ')).includes(norm(search))), [employees, normByEmployee, rateMap, fixedFieldMap, search]);
 
@@ -123,7 +131,7 @@ export default function Page() {
     </div>
     {message && <div className={`wn-message ${message.type}`}><AlertCircle size={16}/><span>{message.text}</span></div>}
     {importSummary?.errors?.length > 0 && <details className="wn-errors"><summary>Xem {importSummary.errors.length} dòng cần kiểm tra</summary><ul>{importSummary.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></details>}
-    <div className="wn-formula"><strong>Công thức:</strong> Lương/ngày Công = tổng 4 thành phần lương cố định lấy từ Định Mức Lương ÷ Số ngày công; Đơn giá Giờ = Lương/ngày Công ÷ 8; Đơn giá Phút = Đơn giá Giờ ÷ 60. <span>Các thành phần lương được lấy ngầm từ Định Mức Lương, không hiển thị thành cột riêng.</span></div>
+    <div className="wn-formula"><strong>Công thức:</strong> Lương/ngày Công = tổng các thành phần lương cố định có dữ liệu lấy từ Định Mức Lương ÷ Số ngày công; Đơn giá Giờ = Lương/ngày Công ÷ 8; Đơn giá Phút = Đơn giá Giờ ÷ 60. <span>Các thành phần lương được lấy ngầm từ Định Mức Lương, không hiển thị thành cột riêng.</span></div>
     <div className="wn-table-wrap">
       <table className="wn-table">
         <thead>
