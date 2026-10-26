@@ -7,6 +7,17 @@ import { fetchEmployees } from '../employee-master/services/employeeService.js';
 const today=()=>new Date().toISOString().slice(0,10);
 const money=n=>n===''||n==null?'':Number(n).toLocaleString('vi-VN',{maximumFractionDigits:2});
 const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLocaleLowerCase('vi').trim();
+const fieldKey=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').toLocaleLowerCase('vi').replace(/[^a-z0-9]+/g,' ').trim();
+function employeeGroupOf(row){
+ const custom=row?.custom_fields&&typeof row.custom_fields==='object'?row.custom_fields:{};
+ const direct=row?.employee_group??row?.group;
+ if(direct!==undefined&&direct!==null&&String(direct).trim())return String(direct).trim();
+ const entries=Object.entries(custom);
+ const match=entries.find(([key])=>['employee group','nhom','nhom nhan su'].includes(fieldKey(key)));
+ if(match&&match[1]!==undefined&&match[1]!==null&&String(match[1]).trim())return String(match[1]).trim();
+ const expanded=Object.entries(row||{}).find(([key])=>['employee group','nhom','nhom nhan su'].includes(fieldKey(key))&&key!=='group'&&key!=='employee_group');
+ return expanded&&expanded[1]!==undefined&&expanded[1]!==null&&String(expanded[1]).trim()?String(expanded[1]).trim():'';
+}
 const csvCell=v=>`\"${String(v??'').replace(/\"/g,'\"\"')}\"`;
 function downloadCsv(filename,rows){const csv='\ufeff'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);}
 function parseCsv(text){
@@ -124,7 +135,7 @@ export default function Page(){
        ]);
        if(policyResult.error)throw policyResult.error;
        if(alive){
-         setEmployees((employeeRows||[]).map(e=>({...e,id:e.employee_code||e.id,name:e.full_name||e.name||'',supabaseId:e.id,department:e.department||e.department_name||'',role:e.position||e.role||'',group:e.employment_type||e.group||'',status:e.status||'Đang làm việc',classification:e.classification||''})));
+         setEmployees((employeeRows||[]).map(e=>({...e,id:e.employee_code||e.id,name:e.full_name||e.name||'',supabaseId:e.id,department:e.department||e.department_name||'',role:e.position||e.role||'',group:employeeGroupOf(e),employment_type:e.employment_type||'',status:e.status||'Đang làm việc',classification:e.classification||e.employment_type||''})));
          setPolicies(policyResult.data||[]);
        }
      }catch(error){if(alive)setNotice(`Không tải được dữ liệu: ${error.message||error.code||'Lỗi'}`);}
