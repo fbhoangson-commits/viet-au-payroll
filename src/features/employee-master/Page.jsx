@@ -17,6 +17,27 @@ const LABELS = {
   start_date: 'Ngày Vào Làm', hire_date: 'Ngày Vào Làm', end_date: 'Ngày Nghỉ Việc',
   created_at: 'Ngày Tạo', updated_at: 'Cập Nhật Lúc'
 };
+// Explicit import-header mapping is required even when employees is empty.
+// Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
+const IMPORT_HEADER_MAP = {
+  'mã nhân viên': 'employee_code', 'ma nhan vien': 'employee_code', 'employee_code': 'employee_code',
+  'họ và tên': 'full_name', 'họ và tên nhân viên': 'full_name', 'ho va ten': 'full_name', 'full_name': 'full_name',
+  'mst / cccd': 'tax_code', 'mst/cccd': 'tax_code', 'mã số thuế / cccd': 'tax_code', 'mã số thuế': 'tax_code', 'cccd': 'tax_code',
+  'phân loại': 'employment_type', 'phan loai': 'employment_type', 'nhóm': 'employee_group', 'nhom': 'employee_group',
+  'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'job_title': 'position',
+  'bộ phận': 'department_name', 'bo phan': 'department_name', 'phòng ban': 'department_name', 'phong ban': 'department_name',
+  'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status',
+  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date',
+  'tham gia bhxh': 'social_insurance', 'bhxh': 'social_insurance', 'người phụ thuộc': 'dependents_count', 'nguoi phu thuoc': 'dependents_count',
+  'email': 'email', 'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes',
+  'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone'
+};
+const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
+const mapImportHeader = header => {
+  const normalized = normalizeHeader(header);
+  return IMPORT_HEADER_MAP[normalized] || IMPORT_HEADER_MAP[normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')] || null;
+};
+
 const DEFAULT_FIELDS = [
   { key: 'employee_code', label: 'Mã Nhân Viên', required: true },
   { key: 'full_name', label: 'Họ và Tên', required: true },
@@ -138,7 +159,7 @@ export default function Page() {
       const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
       if (!rows.length) throw new Error('File không có dòng dữ liệu.');
       const headers = Object.keys(rows[0]);
-      const codeHeader = headers.find(h => ['employee_code','mã nhân viên','ma nhan vien'].includes(h.trim().toLocaleLowerCase('vi')));
+      const codeHeader = headers.find(h => mapImportHeader(h) === 'employee_code');
       if (!codeHeader) throw new Error('Không tìm thấy cột Mã Nhân Viên (employee_code).');
       const seen = new Set(); const errors = [];
       rows.forEach((r,i) => {
@@ -162,9 +183,22 @@ export default function Page() {
         const raw = importPreview.rows[i];
         const normalized = {};
         for (const [header, value] of Object.entries(raw)) {
+          // Blank cells and absent Headers must never erase existing values.
           if (value === null || value === undefined || String(value).trim() === '') continue;
-          const existingField = current.length ? Object.keys(current[0]).find(k => k === header || labelFor(k).toLocaleLowerCase('vi') === header.trim().toLocaleLowerCase('vi')) : null;
-          const key = existingField || (header === 'Mã Nhân Viên' ? 'employee_code' : header === 'Họ và Tên' ? 'full_name' : header);
+          const headerKey = normalizeHeader(header);
+          const existingField = current.length
+            ? Object.keys(current[0]).find(k => k === header || normalizeHeader(labelFor(k)) === headerKey)
+            : null;
+          // Resolve from the explicit map first: an empty employees table cannot
+          // be used to infer its column names from a current row.
+          const key = mapImportHeader(header) || existingField;
+          if (!key) {
+            // Do not submit arbitrary spreadsheet Header names as SQL columns.
+            // Surface unsupported Headers as row errors instead of failing every row
+            // with PostgREST's schema-cache error.
+            failed.push({ row: i+2, code: norm(raw[importPreview.codeHeader]), message: `Header chưa được ánh xạ: ${header}` });
+            continue;
+          }
           if (key === 'id' || ['created_at','updated_at'].includes(key)) continue;
           normalized[key] = value instanceof Date ? value.toISOString() : value;
         }
