@@ -1,56 +1,31 @@
-# WEBAPP LƯƠNG VIỆT ÂU — V9 CLEAN BASE
+# WEBAPP LƯƠNG VIỆT ÂU — Patch Chính Sách Lương V1
 
-Bộ mã nguồn khởi đầu sạch cho repository `viet-au-payroll`.
+## Phạm vi bản vá
+- Dùng lại bảng `public.salary_policy_versions` hiện có; không tạo bảng chính sách thứ hai.
+- Đổi nội dung hiển thị của màn hình hiện có thành **Chính Sách Lương** nhưng không đổi menu/router.
+- Chuẩn hóa Mã Chính Sách Lương: bỏ khoảng trắng đầu/cuối, viết hoa, kiểm tra trùng mã trên giao diện.
+- Kiểm tra ngày hiệu lực đến không được trước ngày hiệu lực từ.
+- Thêm tìm kiếm theo mã, tên, trạng thái và ghi chú.
+- Chặn xóa chính sách đã được tham chiếu bởi `public.salary_rate_rules`; khuyến nghị chuyển sang trạng thái ngừng sử dụng để giữ lịch sử.
+- Thêm migration unique index không phân biệt chữ hoa/thường cho `salary_policy_versions.code`.
+- Giữ nguyên liên kết định mức/quy tắc hiện tại qua `salary_rate_rules.policy_version_id`; tạo chính sách không tự sinh định mức hoặc tự thay đổi lương nhân sự.
 
-## Mục tiêu
-- Giữ nhận diện/logo Việt Âu và nền tảng React + Vite.
-- Làm mới giao diện quản trị và cấu trúc menu.
-- Mỗi trang nghiệp vụ có thư mục riêng dưới `src/features/<slug>/`.
-- Không chứa dữ liệu nhân sự/lương đã import, không có dữ liệu seed.
-- Không kết nối Supabase mặc định; chỉ kết nối khi một module được thiết kế và duyệt riêng.
+## Tệp trong gói
+- `scripts/apply_patch.py`: bản vá nhỏ, kiểm tra từng đoạn nguồn trước khi ghi. Chạy từ thư mục gốc repository.
+- `CHANGES.diff`: diff để rà soát thủ công.
+- `supabase/migrations/20261026_salary_policy_code_unique.sql`: migration bổ sung unique index.
 
-## Chạy local
-1. Cài Node.js LTS.
-2. Chạy `npm install`.
-3. Chạy `npm run dev`.
-4. Kiểm tra production bằng `npm run build`.
+## Cách áp dụng an toàn
+1. Commit hoặc sao lưu repository hiện tại.
+2. Đặt gói này ngoài hoặc trong thư mục repository, sau đó mở terminal tại thư mục gốc repository.
+3. Chạy `python <đường-dẫn-gói>/scripts/apply_patch.py`.
+4. Script chỉ sửa `src/main.jsx` nếu tất cả đoạn mã dự kiến đều khớp chính xác và xuất hiện đúng một lần. Nếu mã nguồn mới đã khác, script sẽ dừng mà không ghi file; khi đó cần đối chiếu thủ công với revision mới nhất, không thay toàn bộ file.
+5. Rà soát `git diff` và chỉ giữ thay đổi thuộc Chính Sách Lương.
+6. Kiểm tra mã trùng trước khi chạy migration. Migration sẽ dừng nếu phát hiện mã trùng (không phân biệt hoa/thường), không tự sửa/xóa dữ liệu.
+7. Chạy build/test theo scripts của repository và kiểm tra quyền RLS bằng tài khoản được cấp quyền.
 
-## Cấu trúc
-- `src/app/`: khung ứng dụng và cấu trúc menu.
-- `src/features/<slug>/Page.jsx`: trang độc lập của từng tính năng.
-- `src/features/<slug>/components/`: component riêng.
-- `src/features/<slug>/services/`: lớp truy cập dữ liệu riêng.
-- `src/features/<slug>/styles/`: CSS riêng.
-- `src/shared/`: component dùng chung.
-- `public/logo-viet-au.png`: logo.
+## Giới hạn kiểm thử
+Gói được tạo dựa trên bản `main.jsx` hiện có trong Library. Không có quyền đọc raw bytes của ZIP repository mới nhất và không có kết nối trực tiếp tới GitHub/Supabase trong phiên này, vì vậy chưa thể xác nhận patch áp dụng được vào revision production hiện tại, chưa chạy build trên repository và chưa áp dụng migration lên database thật.
 
-## Supabase Auth (giai đoạn nền tảng)
-- Đăng nhập bằng email/mật khẩu qua Supabase Auth; phiên đăng nhập được lưu và tự làm mới bởi SDK.
-- Cấu hình biến `VITE_SUPABASE_URL` và `VITE_SUPABASE_ANON_KEY` trong Cloudflare Pages > Settings > Variables and Secrets, sau đó chạy lại deployment.
-- Chỉ dùng publishable/anon key ở frontend; tuyệt đối không đặt `service_role` key trong biến `VITE_*`.
-- Chức năng đăng nhập không tự tạo tài khoản. Tài khoản phải tồn tại trong Supabase Auth.
-- Bản vá này chưa triển khai kiểm tra vai trò từ `public.app_users` hoặc ẩn/hiện module theo quyền; cần xác nhận schema cột và ánh xạ UID trước khi bật phân quyền nghiệp vụ.
-
-## Dữ liệu
-Bộ mã nguồn này không có bản ghi dữ liệu import và không tự xóa dữ liệu trên Supabase. Nếu cần xóa dữ liệu ở backend cũ, phải xác định project, bảng và phạm vi dữ liệu trước khi thao tác.
-
-## Đưa bộ khung lên GitHub mới
-
-Repository đích dự kiến: `https://github.com/fbhoangson-commits/viet-au-payroll`
-
-1. Tải ZIP và giải nén vào một thư mục riêng.
-2. Mở thư mục đã giải nén trong VS Code.
-3. Mở Terminal tại thư mục đó và chạy lần lượt:
-
-```powershell
-git init
-git add .
-git commit -m "Initialize Viet Au Payroll clean base"
-git branch -M main
-git remote add origin https://github.com/fbhoangson-commits/viet-au-payroll.git
-git push -u origin main
-```
-
-Nếu Git báo `remote origin already exists`, chạy `git remote set-url origin https://github.com/fbhoangson-commits/viet-au-payroll.git` rồi chạy lại lệnh push. Nếu Git yêu cầu đăng nhập, hoàn tất xác thực GitHub trong trình duyệt.
-
-Repository cần đang trống như Sơn đã xác nhận. Các lệnh trên sẽ tạo commit đầu tiên; chúng không xóa Supabase hay Cloudflare.
+## Không thay đổi có chủ đích
+Không thay đổi dữ liệu Nhân Sự Master, công thức tính lương, BHXH/thuế, cấu trúc kỳ lương, quyền/RLS, menu/router, hoặc các module khác. Chức năng lọc chính sách ngừng sử dụng khỏi danh sách chọn định mức chưa được thay đổi trong gói này vì cần kiểm tra mã nguồn mới nhất của `src/features/salary-rates/SalaryRatesModule.jsx` để không làm mất khả năng xem/sửa các định mức lịch sử.
