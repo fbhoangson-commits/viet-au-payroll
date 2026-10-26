@@ -1,0 +1,52 @@
+export const NAV_GROUPS = [
+  { title: "TỔNG QUAN", items: [
+    { label: "Tổng quan", slug: "dashboard", icon: "layout-dashboard" },
+  ] },
+  { title: "NHÂN SỰ", items: [
+    { label: "Hồ sơ nhân sự", slug: "employee-master", icon: "users" },
+    { label: "Hợp đồng và Quyết định", slug: "contracts", icon: "file-text" },
+    { label: "Lịch sử nhân sự", slug: "employee-history", icon: "history" },
+  ] },
+  { title: "CẤU HÌNH LƯƠNG", items: [
+    { label: "Phiên bản Chính sách", slug: "salary-policy", icon: "git-branch" },
+    { label: "Định Mức Lương", slug: "salary-rates", icon: "sliders-horizontal" },
+    { label: "Định Mức Ngày Công", slug: "workday-norms", icon: "calendar-days" },
+    { label: "Bảo Hiểm và Người Phụ Thuộc", slug: "insurance-dependents", icon: "landmark" },
+    { label: "Cấu hình công thức", slug: "salary-formulas", icon: "calculator" },
+  ] },
+  { title: "DỮ LIỆU KỲ LƯƠNG", items: [
+    { label: "Quản lý Kỳ Lương", slug: "payroll-periods", icon: "calendar-range" },
+    { label: "Chấm công ngày", slug: "daily-attendance", icon: "calendar-check" },
+    { label: "Dữ liệu Bảo Hiểm và Thuế", slug: "insurance-tax-data", icon: "shield-check" },
+    { label: "Khoản Bổ Sung", slug: "payroll-adjustments", icon: "wallet" },
+    { label: "Hỗ trợ nhân sự", slug: "employee-support", icon: "hand-heart" },
+  ] },
+  { title: "TÍNH LƯƠNG", items: [
+    { label: "Tổng Quan Kỳ Lương", slug: "payroll-overview", icon: "layout-dashboard" },
+    { label: "Nhân Sự Kỳ Lương", slug: "period-employees", icon: "users" },
+    { label: "Lương Cố Định", slug: "fixed-salary", icon: "calculator" },
+    { label: "Lương Tiết Dạy & Phụ Đạo", slug: "teaching-pay", icon: "graduation-cap" },
+    { label: "Khoản Cộng Trừ", slug: "payroll-deductions", icon: "wallet" },
+    { label: "Bảo Hiểm & Phí Công Đoàn", slug: "insurance-union", icon: "landmark" },
+    { label: "Thuế TNCN", slug: "personal-income-tax", icon: "circle-dollar-sign" },
+    { label: "Tổng Hợp Lương", slug: "payroll-summary", icon: "file-spreadsheet" },
+  ] },
+  { title: "DUYỆT LƯƠNG - BÁO CÁO", items: [
+    { label: "Hồ sơ trình duyệt", slug: "payroll-approvals", icon: "clipboard-check" },
+    { label: "Báo cáo Dashboard", slug: "reports-dashboard", icon: "chart-no-axes-combined" },
+    { label: "Báo cáo quỹ lương", slug: "salary-fund-report", icon: "chart-column" },
+    { label: "Báo cáo BHXH & thuế", slug: "insurance-tax-report", icon: "file-chart-column" },
+    { label: "Phiếu lương", slug: "payslips", icon: "file-text" },
+    { label: "Gửi email phiếu lương", slug: "payslip-email", icon: "mail" },
+    { label: "Lịch sử duyệt", slug: "approval-history", icon: "history" },
+  ] },
+  { title: "QUẢN LÝ HỆ THỐNG", items: [
+    { label: "Tài khoản & phân quyền", slug: "user-permissions", icon: "user-cog" },
+    { label: "Nhật ký hoạt động", slug: "activity-log", icon: "history" },
+    { label: "Sao lưu Google Drive", slug: "drive-backup", icon: "cloud-upload" },
+    { label: "Khôi phục dữ liệu", slug: "data-restore", icon: "archive-restore" },
+    { label: "Cấu hình email", slug: "email-settings", icon: "mail" },
+    { label: "Trạng thái kết nối", slug: "connection-status", icon: "database" },
+    { label: "Bảo mật hệ thống", slug: "system-security", icon: "shield-check" },
+  ] },
+];
