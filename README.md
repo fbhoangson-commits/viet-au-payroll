@@ -24,6 +24,13 @@ Bộ mã nguồn khởi đầu sạch cho repository `viet-au-payroll`.
 - `src/shared/`: component dùng chung.
 - `public/logo-viet-au.png`: logo.
 
+## Supabase Auth (giai đoạn nền tảng)
+- Đăng nhập bằng email/mật khẩu qua Supabase Auth; phiên đăng nhập được lưu và tự làm mới bởi SDK.
+- Cấu hình biến `VITE_SUPABASE_URL` và `VITE_SUPABASE_ANON_KEY` trong Cloudflare Pages > Settings > Variables and Secrets, sau đó chạy lại deployment.
+- Chỉ dùng publishable/anon key ở frontend; tuyệt đối không đặt `service_role` key trong biến `VITE_*`.
+- Chức năng đăng nhập không tự tạo tài khoản. Tài khoản phải tồn tại trong Supabase Auth.
+- Bản vá này chưa triển khai kiểm tra vai trò từ `public.app_users` hoặc ẩn/hiện module theo quyền; cần xác nhận schema cột và ánh xạ UID trước khi bật phân quyền nghiệp vụ.
+
 ## Dữ liệu
 Bộ mã nguồn này không có bản ghi dữ liệu import và không tự xóa dữ liệu trên Supabase. Nếu cần xóa dữ liệu ở backend cũ, phải xác định project, bảng và phạm vi dữ liệu trước khi thao tác.
 
