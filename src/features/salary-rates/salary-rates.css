@@ -5,3 +5,89 @@
 .salary-rate-row-actions .btn{margin:2px}
 .salary-rate-table-wrap td>span{display:inline-block;min-width:36px}
 .salary-rate-table-wrap input:disabled{background:#f8fafc;cursor:default}
+
+/* Align Salary Rates controls with the existing Employee Master design. */
+.salary-rates-module .salary-rate-actions .btn,
+.salary-rates-module .salary-rate-config .btn,
+.salary-rates-module .salary-rate-row-actions .btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 15px;
+  border: 1px solid #d6e1ed;
+  border-radius: 10px;
+  background: #fff;
+  color: #244765;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgb(22 54 84 / 4%);
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.salary-rates-module .salary-rate-actions .btn:hover,
+.salary-rates-module .salary-rate-config .btn:hover,
+.salary-rates-module .salary-rate-row-actions .btn:hover {
+  background: #f2f7fb;
+  border-color: #b8cde0;
+  color: #174c75;
+  box-shadow: 0 4px 10px rgb(22 54 84 / 9%);
+  transform: translateY(-1px);
+}
+.salary-rates-module .salary-rate-actions .btn:active,
+.salary-rates-module .salary-rate-config .btn:active,
+.salary-rates-module .salary-rate-row-actions .btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgb(22 54 84 / 7%);
+}
+.salary-rates-module .salary-rate-actions .btn:focus-visible,
+.salary-rates-module .salary-rate-config .btn:focus-visible,
+.salary-rates-module .salary-rate-row-actions .btn:focus-visible {
+  outline: 3px solid rgb(28 133 160 / 20%);
+  outline-offset: 2px;
+}
+.salary-rates-module .salary-rate-actions .btn-primary,
+.salary-rates-module .salary-rate-config .btn-primary,
+.salary-rates-module .salary-rate-row-actions .btn-primary {
+  color: #fff;
+  border-color: #176b83;
+  background: linear-gradient(135deg, #1d5878, #128b91);
+  box-shadow: 0 5px 12px rgb(18 107 131 / 17%);
+}
+.salary-rates-module .salary-rate-actions .btn-primary:hover,
+.salary-rates-module .salary-rate-config .btn-primary:hover,
+.salary-rates-module .salary-rate-row-actions .btn-primary:hover {
+  color: #fff;
+  border-color: #10566d;
+  background: linear-gradient(135deg, #174b69, #0f7c82);
+}
+.salary-rates-module .salary-rate-tabs button {
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.salary-rates-module .salary-rate-tabs button:hover { background: #f0f6fb; color: #214e76; }
+.salary-rates-module .salary-rate-tabs button:active { transform: translateY(1px); }
+.salary-rates-module .salary-rate-table-wrap tbody td:first-child {
+  background: #f1f5f9;
+  color: #1c4262;
+  font-weight: 650;
+}
+.salary-rates-module .salary-rate-table-wrap tbody tr:nth-child(even) td:first-child { background: #eaf0f6; }
+.salary-rates-module .salary-rate-table-wrap tbody tr:hover td:first-child { background: #e1edf7; }
+.salary-rates-module .salary-rate-table-wrap td .salary-rate-employee-group {
+  display: block;
+  margin-top: 4px;
+  color: #7b8ca2;
+  font-size: 10px;
+  font-weight: 500;
+}
+.salary-rates-module .salary-rate-row-actions .btn { min-height: 34px; padding: 0 12px; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .salary-rates-module .salary-rate-actions .btn,
+  .salary-rates-module .salary-rate-config .btn,
+  .salary-rates-module .salary-rate-row-actions .btn,
+  .salary-rates-module .salary-rate-tabs button { transition: none; }
+}
