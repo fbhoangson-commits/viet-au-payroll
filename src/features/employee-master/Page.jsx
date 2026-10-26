@@ -230,8 +230,8 @@ export default function Page() {
   }), [employees, statusFilter, search, filterField, filterValue]);
 
   const filterValues = useMemo(() => [...new Set(employees.map(r => norm(r[filterField])).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [employees, filterField]);
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Hiển thị toàn bộ hồ sơ trong một danh sách cuộn dọc; không phân trang.
+  const visible = filtered;
 
   function startCreate() {
     const initial = {};
@@ -387,7 +387,7 @@ export default function Page() {
     <div className="em-table-wrap">
       <table className="em-table"><thead><tr>{listFields.map(f=><th key={f.key}>{f.label.toLocaleUpperCase('vi')}</th>)}<th></th></tr></thead>
       <tbody>{loading ? <tr><td colSpan={listFields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{listFields.map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
-      <div className="em-table-footer"><span>{filtered.length} hồ sơ · Trang {Math.min(page,pages)} / {pages}</span><div><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}><ChevronLeft size={16}/></button><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}><ChevronRight size={16}/></button></div></div>
+      <div className="em-table-footer"><span>{filtered.length} hồ sơ · Cuộn dọc để xem toàn bộ danh sách</span></div>
     </div>
     <div className="em-permission-note"><ShieldAlert size={15}/><span>Quyền đọc/ghi được kiểm soát bởi phiên đăng nhập và chính sách RLS của Supabase. Hồ sơ tài khoản: {profile?.appUser ? 'đã tìm thấy trong app_users' : 'chưa xác minh được ánh xạ app_users; thao tác sẽ tuân theo RLS'}.</span></div>
 
