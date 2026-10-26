@@ -85,8 +85,15 @@ async function saveWithSchemaFallback(payload, id = null) {
       return await saveEmployee({ ...candidate, custom_fields: customFields, custom_field_order: customOrder }, id);
     } catch (error) {
       const missing = getMissingColumn(error);
-      if (!missing || !Object.prototype.hasOwnProperty.call(candidate, missing) || ['custom_fields','custom_field_order'].includes(missing)) throw error;
-      const value = candidate[missing];
+      if (!missing || ['custom_fields','custom_field_order'].includes(missing)) throw error;
+
+      // Robust schema fallback: any non-internal field rejected by the actual employees schema
+      // becomes a dynamic JSONB field. Do not assume a field exists merely because its name
+      // is familiar or appears in an Excel Header.
+      const hasTopLevel = Object.prototype.hasOwnProperty.call(candidate, missing);
+      const hasDynamic = Object.prototype.hasOwnProperty.call(customFields, missing);
+      if (!hasTopLevel && !hasDynamic) throw error;
+      const value = hasTopLevel ? candidate[missing] : customFields[missing];
       if (value !== undefined && value !== null && String(value).trim() !== '') customFields[missing] = value;
       if (!customOrder.includes(missing)) customOrder.push(missing);
       delete candidate[missing];
@@ -233,11 +240,19 @@ export default function Page() {
         for (const [header, value] of Object.entries(raw)) {
           // Missing columns and blank cells never erase existing data.
           if (value === null || value === undefined || String(value).trim() === '') continue;
-          const key = mapImportHeader(header);
+          const mappedKey = mapImportHeader(header);
           const converted = value instanceof Date ? value.toISOString() : value;
-          if (key && !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(key)) normalized[key] = converted;
+          // Only explicitly supported canonical fields are sent as physical columns. Every
+          // other Header—including dependents_count, employee_group, and future columns—is
+          // stored as dynamic data instead of being posted as a PostgreSQL column.
+          const physicalImportKeys = new Set([
+            'employee_code', 'full_name', 'status', 'department', 'position', 'job_title',
+            'email', 'phone', 'phone_number', 'gender', 'date_of_birth', 'start_date',
+            'hire_date', 'end_date', 'address', 'notes'
+          ]);
+          if (mappedKey && physicalImportKeys.has(mappedKey)) normalized[mappedKey] = converted;
           else dynamicFields[header] = converted;
-          importedOrder.push(key || header);
+          importedOrder.push(mappedKey && physicalImportKeys.has(mappedKey) ? mappedKey : header);
         }
         const code = norm(normalized.employee_code || raw[importPreview.codeHeader]);
         normalized.employee_code = code;
