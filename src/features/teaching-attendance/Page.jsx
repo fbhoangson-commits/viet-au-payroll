@@ -25,6 +25,15 @@ const fmt = v => v == null || v === '' ? '—' : Number(v).toLocaleString('vi-VN
 const money = v => v == null || v === '' ? '—' : `${Number(v).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} đ`;
 const periodLabel = p => `${p.period_code || `KL-${p.period_year}${String(p.period_month).padStart(2, '0')}`} · ${new Date(Number(p.period_year), Number(p.period_month)-1, 1).toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })} · ${p.status || ''}`;
 const isLocked = p => ['LOCKED', 'CLOSED'].includes(String(p?.status || '').toUpperCase());
+const rateValueFor = (values, col) => {
+  const source = values && typeof values === 'object' ? values : {};
+  const keys = [col?.id, col?.code, col?.name, col?.label].filter(v => v !== undefined && v !== null && clean(v) !== '');
+  for (const key of keys) if (Object.prototype.hasOwnProperty.call(source, key) && source[key] !== '' && source[key] != null) return source[key];
+  const normalized = value => norm(value);
+  const wanted = new Set(keys.map(normalized));
+  const match = Object.keys(source).find(key => wanted.has(normalized(key)));
+  return match === undefined ? undefined : source[match];
+};
 const groupCode = g => {
   const code = norm(g?.code || '');
   const name = norm(g?.name || '');
@@ -100,8 +109,12 @@ export default function Page() {
   const currentColumns = useMemo(() => currentGroup ? columns.filter(c => c.group_id === currentGroup.source.id && c.is_active !== false).sort((a,b) => Number(a.display_order||0)-Number(b.display_order||0) || String(a.name).localeCompare(String(b.name), 'vi')) : [], [columns, currentGroup]);
   const rateMap = useMemo(() => {
     const map = new Map();
+    // Prefer the selected policy, but fall back to the employee/group's saved rates
+    // when the period has no policy link or the saved row uses another policy ID.
     for (const row of rateValues) {
-      if (row.policy_version_id === policyId) map.set(`${row.employee_id}|${row.group_id}`, row.values || {});
+      const key = `${row.employee_id}|${row.group_id}`;
+      const existing = map.get(key);
+      if (!existing || row.policy_version_id === policyId) map.set(key, row.values || {});
     }
     return map;
   }, [rateValues, policyId]);
@@ -116,7 +129,7 @@ export default function Page() {
       const rates = rateMap.get(`${employee.employee_id}|${currentGroup?.source?.id}`) || {};
       for (const col of currentColumns) {
         const n = recordMap.get(`${employee.employee_id}|${col.id}`) || 0;
-        const rawRate = rates[col.id];
+        const rawRate = rateValueFor(rates, col);
         if (rawRate === '' || rawRate == null || !Number.isFinite(Number(rawRate))) missingRates++;
         else { lessons += n; total += n * Number(rawRate); }
       }
@@ -202,7 +215,7 @@ export default function Page() {
     if (invalid) { setNotice({ type: 'error', text: `Số tiết không hợp lệ tại cột ${invalid.col.name}. Chỉ nhập số không âm.` }); return; }
     const missing = values.find(({ col }) => {
       const rates = rateMap.get(`${employee.employee_id}|${currentGroup.source.id}`) || {};
-      return rates[col.id] == null || rates[col.id] === '' || !Number.isFinite(Number(rates[col.id]));
+      const rate = rateValueFor(rates, col); return rate == null || rate === '' || !Number.isFinite(Number(rate));
     });
     if (missing) {
       setNotice({ type: 'error', text: `Chưa có đơn giá hợp lệ cho ${employee.employee_name_snapshot} · ${missing.col.name}. Hãy bổ sung Định Mức Lương trước khi lưu.` });
@@ -363,7 +376,7 @@ export default function Page() {
                   let total = 0, missing = false;
                   const cells = currentColumns.map(col => {
                     const count = recordMap.get(`${employee.employee_id}|${col.id}`) || 0;
-                    const rawRate = rates[col.id];
+                    const rawRate = rateValueFor(rates, col);
                     const rate = rawRate == null || rawRate === '' || !Number.isFinite(Number(rawRate)) ? null : Number(rawRate);
                     if (rate == null) missing = true; else total += count * rate;
                     return { col, count, rate, amount: rate == null ? null : count * rate };

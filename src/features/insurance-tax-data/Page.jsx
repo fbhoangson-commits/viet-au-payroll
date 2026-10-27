@@ -45,6 +45,13 @@ const normalizeClassification = value => {
  return String(value).trim();
 };
 const parseMoney = v => { if(typeof v==='number') return v; let s=String(v??'').trim().replace(/[₫đ\s]/gi,''); if(!s)return 0; if(s.includes('.')&&s.includes(',')) s=s.lastIndexOf(',')>s.lastIndexOf('.')?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,''); else if(s.includes(','))s=/^\d{1,3}(,\d{3})+$/.test(s)?s.replace(/,/g,''):s.replace(',','.'); else if(s.includes('.')&&/^\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,''); const n=Number(s);return Number.isFinite(n)?n:0; };
+const rateValueFor = (values, col) => {
+ const source=values&&typeof values==='object'?values:{};
+ const keys=[col?.id,col?.code,col?.name,col?.label].filter(v=>v!==undefined&&v!==null&&String(v).trim()!=='').map(String);
+ for(const key of keys)if(Object.prototype.hasOwnProperty.call(source,key)&&source[key]!==''&&source[key]!==null&&source[key]!==undefined)return source[key];
+ const normalizeKey=v=>norm(v).replace(/[^a-z0-9]+/g,' ').trim();const wanted=new Set(keys.map(normalizeKey));const match=Object.keys(source).find(key=>wanted.has(normalizeKey(key)));
+ return match===undefined?undefined:source[match];
+};
 const defaultDraft = row => ({ participates_insurance: row.participates_insurance ?? null, insurance_salary_base: row.insurance_salary_base ?? '', employee_social_rate: row.employee_social_rate ?? 8, employee_health_rate: row.employee_health_rate ?? 1.5, employee_unemployment_rate: row.employee_unemployment_rate ?? 1, dependent_count: row.dependent_count ?? 0, personal_relief_amount: row.personal_relief_amount ?? 15500000, dependent_relief_amount: row.dependent_relief_amount ?? 6200000, support_amount: row.support_amount ?? 0, has_commitment: row.has_commitment ?? false, commitment_validated: row.commitment_validated ?? false, commitment_reference: row.commitment_reference ?? '', employee_type: row.employee_type ?? 'Cơ Hữu', taxable_income_override: row.taxable_income_override ?? '', notes: row.notes ?? '' });
 function tax5(taxable){const x=Math.max(0,Number(taxable)||0);if(x<=10000000)return Math.round(x*.05);if(x<=30000000)return Math.round(x*.10-500000);if(x<=60000000)return Math.round(x*.20-3500000);if(x<=100000000)return Math.round(x*.30-9500000);return Math.round(x*.35-14500000);}
 function taxEstimate(row){ if(row.has_commitment && row.commitment_validated) return 0; const type=norm(row.employee_type); const income=Math.max(0,row.taxable_income_override!==''&&row.taxable_income_override!==null&&row.taxable_income_override!==undefined?(Number(row.taxable_income_override)||0):(Number(row.calculated_taxable_income)||0)); if(type.includes('co huu')||type.includes('cơ hữu'))return tax5(income); return Math.round(income*.1); }
@@ -76,21 +83,13 @@ export default function Page(){
   const groupById=new Map(groupRows.map(g=>[g.id,g]));const columnById=new Map(columnRows.map(c=>[c.id,c]));
   const ratesByEmployeeGroup=new Map();
   activeRates.forEach(v=>ratesByEmployeeGroup.set(`${v.employee_id}|${v.group_id}`,v.values||{}));
-  // Keep every saved row as fallback when the selected policy link is missing or mismatched.
+  // Fallback to saved employee rate values if the selected policy has no matching row for a group.
   const allRatesByEmployeeGroup=new Map();
   rateRows.forEach(v=>allRatesByEmployeeGroup.set(`${v.employee_id}|${v.group_id}`,v.values||{}));
-  const readRate=(values,col)=>{
-   const keys=[col?.id,col?.code,col?.name,col?.label].filter(v=>v!==undefined&&v!==null&&String(v).trim()!=='');
-   for(const key of keys){if(values&&Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!=='')return values[key];}
-   const normalizeKey=v=>norm(v).replace(/[^a-z0-9]/g,'');
-   const wanted=new Set(keys.map(normalizeKey));
-   const matched=Object.keys(values||{}).find(k=>wanted.has(normalizeKey(k)));
-   return matched===undefined?undefined:values[matched];
-  };
   const calcIncomeFor=(employeeId,employeeCode,month)=>{
-   const getGroupTotal=groupCodes=>{let total=0;for(const g of groupRows){const groupName=norm(`${g.code||''} ${g.name||''}`);if(!groupCodes.some(code=>groupName.includes(norm(code))))continue;const values=ratesByEmployeeGroup.get(`${employeeId}|${g.id}`)??allRatesByEmployeeGroup.get(`${employeeId}|${g.id}`)??{};for(const col of columnRows.filter(c=>c.group_id===g.id&&c.is_active!==false)){const raw=values[col.id]??values[col.code]??values[col.name];total+=parseMoney(raw);}}return total;};
+   const getGroupTotal=groupCodes=>{let total=0;for(const g of groupRows){const groupName=norm(`${g.code||''} ${g.name||''}`);if(!groupCodes.some(code=>groupName.includes(norm(code))))continue;const values=ratesByEmployeeGroup.get(`${employeeId}|${g.id}`)??allRatesByEmployeeGroup.get(`${employeeId}|${g.id}`)??{};for(const col of columnRows.filter(c=>c.group_id===g.id&&c.is_active!==false)){const raw=rateValueFor(values,col);total+=parseMoney(raw);}}return total;};
    const fixedSalary=getGroupTotal(['FIXED','Cố Định','Cố Định']);
-   let teachingPay=0;for(const lesson of lessonRows.filter(x=>String(x.employee_id||'')===String(employeeId||'')||String(x.employee_code||x.employee_code_snapshot||'').trim().toLocaleUpperCase('vi')===String(employeeCode||'').trim().toLocaleUpperCase('vi'))){const col=columnById.get(String(lesson.salary_rate_column_id||''));if(!col)continue;const lessonEmployee=String(lesson.employee_id||employeeId||'');const groupKey=`${lessonEmployee}|${col.group_id}`;const values=ratesByEmployeeGroup.get(groupKey)??allRatesByEmployeeGroup.get(groupKey)??ratesByEmployeeGroup.get(`${employeeId}|${col.group_id}`)??allRatesByEmployeeGroup.get(`${employeeId}|${col.group_id}`)??{};const rateRaw=readRate(values,col);teachingPay+=parseMoney(lesson.lesson_count)*parseMoney(rateRaw);}
+   let teachingPay=0;for(const lesson of lessonRows.filter(x=>String(x.employee_id||'')===String(employeeId||'')||String(x.employee_code||x.employee_code_snapshot||'').trim().toLocaleUpperCase('vi')===String(employeeCode||'').trim().toLocaleUpperCase('vi'))){const col=columnById.get(String(lesson.salary_rate_column_id||''));if(!col)continue;const values=ratesByEmployeeGroup.get(`${lesson.employee_id||employeeId}|${col.group_id}`)??allRatesByEmployeeGroup.get(`${lesson.employee_id||employeeId}|${col.group_id}`)??ratesByEmployeeGroup.get(`${employeeId}|${col.group_id}`)??allRatesByEmployeeGroup.get(`${employeeId}|${col.group_id}`)??{};const rate=parseMoney(rateValueFor(values,col));teachingPay+=parseMoney(lesson.lesson_count)*rate;}
    const monthKey=String(month||chosen?.month||chosen?.start_date||'').slice(0,7);
    let additions=0,deductions=0;
    for(const a of adjustmentRows){if(a.employee_id!==employeeId||String(a.status||'ACTIVE').toUpperCase()!=='ACTIVE')continue;const kind=String(a.kind||'').toUpperCase();const app=String(a.application_type||'PER_PERIOD').toUpperCase();let applies=app==='PER_PERIOD'?a.period_id===selected:false;if(app==='FIXED'){const from=String(a.effective_from||'').slice(0,7),to=String(a.effective_to||'').slice(0,7);applies=Boolean(monthKey&&from&&from<=monthKey&&(!to||to>=monthKey));}if(!applies)continue;const amount=parseMoney(a.amount??(parseMoney(a.quantity)*parseMoney(a.unit_price)));if(kind==='ADD')additions+=amount;else if(kind==='DEDUCT')deductions+=amount;}

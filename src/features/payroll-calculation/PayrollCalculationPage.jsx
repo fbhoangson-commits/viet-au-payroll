@@ -165,7 +165,7 @@ export default function PayrollCalculationPage({ page }) {
         valuesByEmployee.get(key).push(r);
       }
       const selectedRateColumns=columns.filter(c=>c.is_active!==false);
-      const rateGroupName = c => { const g=groupsById.get(clean(c.group_id))||{}; return norm(`${g.name||''} ${g.code||''}`); };
+      const rateGroupName = c => { const g=groupsById.get(clean(c.group_id)); return norm(`${g?.code || ''} ${g?.name || ''}`); };
       const isFixedGroup = c => { const n=rateGroupName(c); return n.includes('fixed') || n.includes('co dinh'); };
       const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('other') || n.includes('teaching') || n.includes('tutoring'); };
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
@@ -216,7 +216,7 @@ export default function PayrollCalculationPage({ page }) {
         const fixedParts=Object.fromEntries(fixedColumns.map(c=>[`fixedCol_${c.id}`,0]));
         for(const rv of rateRows){
           const group=groupsById.get(clean(rv.group_id));
-          const groupName=norm(group?.name||group?.code||'');
+          const groupName=norm(`${group?.code||''} ${group?.name||''}`);
           if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName.includes('khac')||groupName.includes('other')||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
           const vals=rv.values && typeof rv.values==='object' ? rv.values : {};
           for(const c of fixedColumns.filter(c=>clean(c.group_id)===clean(rv.group_id))){
