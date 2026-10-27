@@ -36,8 +36,8 @@ const colLabel = {
  code:'Mã Nhân Viên', name:'Họ và Tên', classification:'Phân loại', department:'Bộ phận', position:'Chức danh',
  fixed:'Lương Cố Định', teaching:'Thành Tiền Tiết Dạy', additions:'Khoản Cộng', deductions:'Khoản Trừ',
  insuranceEmployee:'BHXH NLĐ', unionEmployee:'Phí Công Đoàn NLĐ', employerInsurance:'BHXH đơn vị',
- tax:'Thuế TNCN', taxAmount:'Thuế TNCN', gross:'Tổng Thu Nhập', net:'Thực Lĩnh', status:'Trạng Thái Dữ Liệu',
- lessonCount:'Tổng Số Tiết', rateCount:'Số Cấu Phần Có Đơn Giá', taxable:'Thu Nhập Tính Thuế',
+ tax:'Thu Nhập Chịu Thuế', taxable:'Thu Nhập Chịu Thuế', taxAmount:'Thuế TNCN', gross:'Tổng Thu Nhập', net:'Thực Lĩnh', status:'Trạng Thái Dữ Liệu',
+ lessonCount:'Tổng Số Tiết', rateCount:'Số Cấu Phần Có Đơn Giá', taxable:'Thu Nhập Chịu Thuế',
  participates:'Tham Gia BHXH', taxStatus:'Trạng Thái Thuế'
 };
 async function fetchRows(table, label, warnings, required=false) {
@@ -57,13 +57,14 @@ function tax5(value) {
   if(x<=100000000)return Math.round(x*.30-9500000);
   return Math.round(x*.35-14500000);
 }
-function estimateTax(row) {
-  if(row?.has_commitment && row?.commitment_validated) return 0;
+function estimateTax(row, taxableValue) {
+  if (row?.has_commitment && row?.commitment_validated) return 0;
   const stored = firstDefined(row, ['tax_amount','taxAmount','personal_income_tax_amount','income_tax_amount','pit_amount','tax_payable','withholding_tax_amount']);
-  if (stored !== undefined) return Math.max(0, num(stored));
-  const taxable=Math.max(0,num(row?.taxable_income_override!=='' && row?.taxable_income_override!==null && row?.taxable_income_override!==undefined ? row.taxable_income_override : row?.calculated_taxable_income ?? row?.taxable_income));
-  const type=norm(row?.employee_type || row?.employee_classification);
-  return type.includes('co huu') ? tax5(taxable) : taxable>=5000000 ? Math.round(taxable*.1) : 0;
+  if (stored !== undefined && num(stored) > 0) return Math.max(0, num(stored));
+  const rawOverride = row?.taxable_income_override;
+  const taxable = Math.max(0, num(rawOverride !== '' && rawOverride !== null && rawOverride !== undefined ? rawOverride : taxableValue ?? row?.calculated_taxable_income ?? row?.taxable_income));
+  const type = norm(row?.employee_type || row?.employee_classification);
+  return type.includes('co huu') ? tax5(taxable) : taxable >= 5000000 ? Math.round(taxable * .1) : 0;
 }
 function firstDefined(row, keys) {
   for (const key of keys) if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
@@ -127,7 +128,7 @@ export default function PayrollCalculationPage({ page }) {
       const selectedId=(keepPeriod && periodId && fixedPeriods.some(p=>p.id===periodId)) ? periodId : (fixedPeriods[0]?.id || '');
       setPeriodId(selectedId);
       if(!selectedId){setRows([]);setWarnings(['Chưa có Kỳ Lương tháng (FIXED). Hãy tạo Kỳ Lương trong menu Quản lý Kỳ Lương.']);setDataLoaded(true);return;}
-      const [snapshotA,snapshotB,employees,groups,columns,rateValues,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles] = await Promise.all([
+      const [snapshotA,snapshotB,employees,groups,columns,rateValues,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles,taxConfigs,commitments] = await Promise.all([
         fetchRows('payroll_period_employees','Danh sách nhân sự kỳ',notes),
         fetchRows('payroll_period_employee_snapshots','Snapshot nhân sự kỳ',notes),
         fetchRows('employees','Employee Master',notes,true),
@@ -142,6 +143,8 @@ export default function PayrollCalculationPage({ page }) {
         fetchRows('employee_support_allowances','Hỗ trợ nhân sự',notes),
         fetchRows('daily_attendance_records','Chấm công ngày',notes),
         fetchRows('employee_union_profiles','Hồ sơ Công đoàn',notes),
+        fetchRows('payroll_tax_relief_config','Cấu hình giảm trừ thuế',notes),
+        fetchRows('employee_income_commitments','Cam kết thu nhập',notes),
       ]);
       const snapshotsRaw=snapshotA.filter(r=>rowPeriodId(r)===selectedId);
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
@@ -171,9 +174,19 @@ export default function PayrollCalculationPage({ page }) {
       const insuranceByEmployee=new Map();
       for(const r of insuranceProfiles) insuranceByEmployee.set(employeeId(r),r);
       const unionByEmployee=new Map();
-      for(const r of unionProfiles) unionByEmployee.set(employeeId(r),r);
-      const supportFor=(id,code)=>supportRows.filter(r=>(employeeId(r)===id || clean(r.employee_code)===code) && (!r.period_id || rowPeriodId(r)===selectedId) && !['CANCELLED','INACTIVE'].includes(String(r.status||'').toUpperCase())).reduce((s,r)=>s+num(r.amount||r.support_amount),0);
-      const depCountFor=(id,code)=>dependents.filter(r=>(employeeId(r)===id || clean(r.employee_code)===code) && r.is_active!==false && !['INACTIVE','CANCELLED'].includes(String(r.status||'').toUpperCase())).length;
+      const unionByCode=new Map();
+      for(const r of unionProfiles){ if(employeeId(r)) unionByEmployee.set(employeeId(r),r); const c=clean(r.employee_code||r.employee_code_snapshot); if(c) unionByCode.set(c,r); }
+      const insuranceByCode=new Map();
+      for(const r of insuranceProfiles){const c=clean(r.employee_code||r.employee_code_snapshot);if(c)insuranceByCode.set(c,r);}
+      const dependentCountFor=(id,code,master,snapshot)=>{
+        const fromMaster=firstDefined(master,['dependent_count','dependents_count','number_of_dependents','so_nguoi_phu_thuoc','số người phụ thuộc']);
+        const fromSnapshot=firstDefined(snapshot,['dependent_count','dependents_count','number_of_dependents','so_nguoi_phu_thuoc','số người phụ thuộc']);
+        const explicit=firstDefined(taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{},['dependent_count']);
+        if(explicit!==undefined)return Math.max(0,num(explicit)); if(fromMaster!==undefined)return Math.max(0,num(fromMaster));if(fromSnapshot!==undefined)return Math.max(0,num(fromSnapshot));
+        return dependents.filter(d=>(employeeId(d)===id||clean(d.employee_code||d.employee_code_snapshot)===code)&&d.is_active!==false&&!['INACTIVE','CANCELLED','NGỪNG GIẢM TRỪ','NGUNG GIAM TRU'].includes(norm(d.status).toUpperCase())).length;
+      };
+      const defaultTaxConfig=taxConfigs.find(c=>clean(c.config_key)==='default')||taxConfigs[0]||{};
+      const supportFor=(id,code)=>supportRows.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && (!r.period_id || rowPeriodId(r)===selectedId) && !['CANCELLED','INACTIVE'].includes(String(r.status||'').toUpperCase())).reduce((sum,r)=>sum+num(r.amount??r.support_amount??Object.values(r.amounts||{}).reduce((a,v)=>a+num(v),0)),0);
       const output=snapshots.map(s=>{
         const id=employeeId(s), code=clean(s.employee_code||s.employee_code_snapshot), master=masterById.get(id)||{};
         const rateRows=valuesByEmployee.get(id)||[];
@@ -209,15 +222,26 @@ export default function PayrollCalculationPage({ page }) {
         const tax=taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{};
         const hasTaxData=Boolean(tax.id || tax.employee_id || tax.employee_code || tax.employee_code_snapshot);
         const hasMasterProfile=Boolean(master.id);
-        const insurance=insuranceByEmployee.get(id)||{};
-        const insuranceEmployee=num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? (num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*((num(tax.employee_social_rate ?? insurance.employee_social_rate)+num(tax.employee_health_rate ?? insurance.employee_health_rate)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate))/100)));
+        const insurance=insuranceByEmployee.get(id)||insuranceByCode.get(code)||{};
+        const insuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
+        const insuranceEmployee=num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? ((tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*insuranceRate/100 : 0));
         const employerInsurance=num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
-        const union=unionByEmployee.get(id)||{};
-        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? 0);
-        const taxable=num(firstDefined(tax,['taxable_income_override','calculated_taxable_income','taxable_income','taxable_amount']) ?? 0);
+        const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
+        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         const classification=classificationOf(tax,master,s);
-        const taxAmount=estimateTax({...tax,employee_type:firstText(tax.employee_type,tax.employee_classification,classification)});
+        const employeeType=firstText(tax.employee_type,tax.employee_classification,classification);
         const gross=fixed+teaching+additions;
+        const dependentCount=dependentCountFor(id,code,master,s);
+        const supportAmount=num(tax.support_amount ?? supportFor(id,code));
+        const reliefPersonal=num(tax.personal_relief_amount ?? defaultTaxConfig.personal_relief_amount ?? 15500000);
+        const reliefDependent=num(tax.dependent_relief_amount ?? defaultTaxConfig.dependent_relief_amount ?? 6200000);
+        const override=tax.taxable_income_override;
+        const storedTaxable=firstDefined(tax,['calculated_taxable_income','taxable_income','taxable_amount']);
+        const isPermanent=norm(employeeType).includes('co huu');
+        const calculatedTaxable=isPermanent ? Math.max(0,gross-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-insuranceEmployee) : Math.max(0,fixed+teaching+additions);
+        const taxable=Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:(storedTaxable!==undefined&&num(storedTaxable)>0?storedTaxable:calculatedTaxable)));
+        const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
+        const taxAmount=estimateTax({...tax,...commitment,employee_type:employeeType},taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
@@ -228,7 +252,7 @@ export default function PayrollCalculationPage({ page }) {
         const fixedComponentCount=rateCount;
         const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
         const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
-        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??depCountFor(id,code),support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
+        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
       }).sort((a,b)=>a.code.localeCompare(b.code,'vi',{numeric:true}));
       setRows(output);setWarnings(notes);setDataLoaded(true);
     } catch(e) {setError(errorText(e));setRows([]);setWarnings(notes);setDataLoaded(false);}
@@ -251,14 +275,14 @@ export default function PayrollCalculationPage({ page }) {
   },{fixed:0,teaching:0,additions:0,deductions:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxable:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
 
   const columns = useMemo(()=>{
-    if(page==='period-employees')return ['code','name','classification','department','position','status'];
-    if(page==='fixed-salary')return ['code','name','classification',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('fixedCol_')).slice(0,4),'fixed','fixedComponentCount','status'];
-    if(page==='teaching-pay')return ['code','name',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('lesson_')),'lessonCount','teaching'];
-    if(page==='payroll-deductions')return ['code','name','additionCount','additions','deductionCount','deductions','difference','status'];
-    if(page==='insurance-union')return ['code','name','participates','insuranceEmployee','unionEmployee','status'];
+    if(page==='period-employees')return ['code','name','classification','department','position','taxable','taxAmount','status'];
+    if(page==='fixed-salary')return ['code','name','classification',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('fixedCol_')).slice(0,4),'fixed','taxable','taxAmount','fixedComponentCount','status'];
+    if(page==='teaching-pay')return ['code','name',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('lesson_')),'lessonCount','teaching','taxable','taxAmount'];
+    if(page==='payroll-deductions')return ['code','name','additionCount','additions','deductionCount','deductions','difference','taxable','taxAmount','status'];
+    if(page==='insurance-union')return ['code','name','participates','insuranceEmployee','unionEmployee','taxable','taxAmount','status'];
     if(page==='personal-income-tax')return ['code','name','classification','taxMethod','taxable','taxAmount','taxStatus'];
-    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxAmount','gross','net','status'];
-    return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxAmount','gross','net','status'];
+    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
+    return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
   },[page,rows]);
   const dynamicLabels = rows[0]?.columnLabels || {};
   const columnLabel = k => colLabel[k] || dynamicLabels[k] || k;
