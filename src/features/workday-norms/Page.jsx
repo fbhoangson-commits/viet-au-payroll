@@ -101,7 +101,7 @@ export default function Page() {
         seenCodes.add(code);
         const employee = employeeByCode.get(code);
         if (!employee) { errors.push(`Dòng ${i + 2}: không tìm thấy Mã Nhân Viên ${code} trong Nhân Sự Master.`); return; }
-        if (days === null || !Number.isFinite(days) || days <= 0) { errors.push(`Dòng ${i + 2}: số ngày công phải lớn hơn 0.`); return; }
+        if (days === null || !Number.isFinite(days) || days < 0 || days > 31) { errors.push(`Dòng ${i + 2}: số ngày công phải từ 0 đến 31; nhập 0 cho nhóm Không tính công.`); return; }
         const employeeId = employee.id || employee.supabase_id;
         if (!employeeId) { errors.push(`Dòng ${i + 2}: nhân sự ${code} chưa có ID ổn định để lưu.`); return; }
         matchedEmployees++;
@@ -115,7 +115,7 @@ export default function Page() {
     } catch (e) { setMessage({ type: 'error', text: `Không Import được: ${e.message || e}` }); }
     finally { setBusy(false); }
   }
-  function downloadTemplate() { downloadCsv('template-dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Số ngày công'], ['VA001', '26'], ['VA002', '26']]); }
+  function downloadTemplate() { downloadCsv('template-dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Số ngày công'], ['VA001', '26'], ['VA002', '28'], ['VA003', '0']]); }
   function exportRows() { downloadCsv('dinh-muc-ngay-cong.csv', [['Mã Nhân Viên', 'Họ và Tên', 'Vị trí', 'Chính Sách Lương', 'Số ngày công', 'Lương/ngày Công', 'Đơn giá Giờ', 'Đơn giá Phút', 'Trạng thái'], ...rows.map(r => [r.code, r.name, r.position, getPolicyCode(policies.find(p => p.id === policyId)), r.workdayNorm?.workday_count ?? '', r.daily ?? '', r.hourly ?? '', r.minute ?? '', r.daily === null ? `Thiếu dữ liệu: ${[...r.missing, !r.workdayNorm ? 'Định mức ngày công' : ''].filter(Boolean).join(', ')}` : 'Đủ dữ liệu'])]); }
 
 

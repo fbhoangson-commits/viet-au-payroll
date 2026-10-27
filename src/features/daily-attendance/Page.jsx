@@ -48,6 +48,7 @@ export default function Page() {
   const [periodId, setPeriodId] = useState('');
   const [employees, setEmployees] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
+  const [workdayNorms, setWorkdayNorms] = useState([]);
   const [settings, setSettings] = useState(null);
   const [codes, setCodes] = useState([]);
   const [records, setRecords] = useState([]);
@@ -55,14 +56,14 @@ export default function Page() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [groupFilter, setGroupFilter] = useState('ALL');
   const [notice, setNotice] = useState(null);
   const [showConfig, setShowConfig] = useState(true);
-  const [defaultType, setDefaultType] = useState('26');
-  const [defaultDays, setDefaultDays] = useState('26');
+  const [standard26Days, setStandard26Days] = useState('26');
+  const [standard28Days, setStandard28Days] = useState('28');
+  const [presentCode, setPresentCode] = useState('');
+  const [sundayCode, setSundayCode] = useState('');
   const [configNote, setConfigNote] = useState('');
-  const [editingEmployee, setEditingEmployee] = useState('');
-  const [employeeType, setEmployeeType] = useState('26');
-  const [employeeDays, setEmployeeDays] = useState('26');
   const [newCode, setNewCode] = useState('');
   const [newCodeLabel, setNewCodeLabel] = useState('');
   const [newCodeUnits, setNewCodeUnits] = useState('');
@@ -89,7 +90,7 @@ export default function Page() {
 
   const loadPeriodData = useCallback(async (id) => {
     if (!supabase || !id) {
-      setSnapshots([]); setRecords([]); setSettings(null); setCodes([]); setEmployees([]);
+      setSnapshots([]); setRecords([]); setSettings(null); setCodes([]); setEmployees([]); setWorkdayNorms([]);
       return;
     }
     const results = await Promise.all([
@@ -97,14 +98,17 @@ export default function Page() {
       supabase.from(SETTINGS).select('*').eq('period_id', id).maybeSingle(),
       supabase.from(CODES).select('*').eq('is_active', true).order('display_order').order('code'),
       supabase.from(RECORDS).select('*').eq('period_id', id).order('work_date'),
+      supabase.from('salary_workday_norms').select('employee_id,policy_version_id,workday_count').eq('policy_version_id', periods.find(p => p.id === id)?.salary_version_id || '00000000-0000-0000-0000-000000000000'),
     ]);
-    const [s, c, k, r] = results;
+    const [s, c, k, r, n] = results;
     for (const result of results) if (result.error) throw result.error;
-    setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []);
-    setDefaultType(c.data?.default_standard_type || '26');
-    setDefaultDays(c.data?.default_standard_days == null ? (c.data?.default_standard_type === '28' ? '28' : '26') : String(c.data.default_standard_days));
+    setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []); setWorkdayNorms(n.data || []);
+    setStandard26Days(String(c.data?.standard_26_days ?? 26));
+    setStandard28Days(String(c.data?.standard_28_days ?? 28));
     setConfigNote(c.data?.notes || '');
-  }, []);
+    setPresentCode(old => old || (k.data || []).find(x => /đi làm|có mặt|present/i.test(`${x.code} ${x.label}`))?.code || '');
+    setSundayCode(old => old || (k.data || []).find(x => /off|chủ nhật|nghỉ cn|nghỉ chủ nhật/i.test(`${x.code} ${x.label}`))?.code || '');
+  }, [periods]);
 
   const refresh = useCallback(async () => {
     if (!supabase) { setNotice({ type: 'error', text: 'Chưa cấu hình kết nối Supabase.' }); return; }
@@ -142,23 +146,25 @@ export default function Page() {
 
   useEffect(() => {
     let alive = true;
-    if (!periodId || !supabase) { setSnapshots([]); setRecords([]); setSettings(null); setCodes([]); return undefined; }
+    if (!periodId || !supabase) { setSnapshots([]); setRecords([]); setSettings(null); setCodes([]); setWorkdayNorms([]); return undefined; }
     setLoading(true); setNotice(null);
     (async () => {
       try {
-        const [s, c, k, r, employeeRows] = await Promise.all([
+        const [s, c, k, r, employeeRows, normResult] = await Promise.all([
           supabase.from(SNAPSHOTS).select('*').eq('period_id', periodId).order('employee_code_snapshot'),
           supabase.from(SETTINGS).select('*').eq('period_id', periodId).maybeSingle(),
           supabase.from(CODES).select('*').eq('is_active', true).order('display_order').order('code'),
           supabase.from(RECORDS).select('*').eq('period_id', periodId).order('work_date'),
           fetchEmployees(),
+          supabase.from('salary_workday_norms').select('employee_id,policy_version_id,workday_count').eq('policy_version_id', periods.find(p => p.id === periodId)?.salary_version_id || '00000000-0000-0000-0000-000000000000'),
         ]);
-        for (const result of [s, c, k, r]) if (result.error) throw result.error;
+        for (const result of [s, c, k, r, normResult]) if (result.error) throw result.error;
         if (!alive) return;
-        setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []); setEmployees(employeeRows || []);
-        setDefaultType(c.data?.default_standard_type || '26');
-        setDefaultDays(c.data?.default_standard_days == null ? (c.data?.default_standard_type === '28' ? '28' : '26') : String(c.data.default_standard_days));
+        setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []); setEmployees(employeeRows || []); setWorkdayNorms(normResult.data || []);
+        setStandard26Days(String(c.data?.standard_26_days ?? 26)); setStandard28Days(String(c.data?.standard_28_days ?? 28));
         setConfigNote(c.data?.notes || '');
+        setPresentCode(old => old || (k.data || []).find(x => /đi làm|có mặt|present/i.test(`${x.code} ${x.label}`))?.code || '');
+        setSundayCode(old => old || (k.data || []).find(x => /off|chủ nhật|nghỉ cn|nghỉ chủ nhật/i.test(`${x.code} ${x.label}`))?.code || '');
       } catch (error) { if (alive) setNotice({ type: 'error', text: `Không tải được dữ liệu kỳ: ${errorText(error)}. Có thể cần chạy migration Chấm công ngày.` }); }
       finally { if (alive) setLoading(false); }
     })();
@@ -191,40 +197,30 @@ export default function Page() {
   async function saveSettings(event) {
     event.preventDefault();
     if (!canEdit || !selectedPeriod) return;
-    if (defaultType !== 'NONE' && (!Number.isFinite(Number(defaultDays)) || Number(defaultDays) <= 0 || Number(defaultDays) > 31)) {
-      setNotice({ type: 'error', text: 'Công chuẩn thực tế phải lớn hơn 0 và không vượt quá 31.' }); return;
+    for (const [label, value] of [['Nhóm 26 ngày', standard26Days], ['Nhóm 28 ngày', standard28Days]]) {
+      if (!Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) > 31) {
+        setNotice({ type: 'error', text: `${label}: công chuẩn thực tế phải lớn hơn 0 và không vượt quá 31.` }); return;
+      }
     }
     setSaving(true); setNotice(null);
     try {
       const payload = {
-        period_id: selectedPeriod.id, default_standard_type: defaultType,
-        default_standard_days: defaultType === 'NONE' ? null : Number(defaultDays), notes: configNote.trim() || null,
+        period_id: selectedPeriod.id,
+        default_standard_type: '26',
+        default_standard_days: Number(standard26Days),
+        standard_26_days: Number(standard26Days),
+        standard_28_days: Number(standard28Days),
+        notes: configNote.trim() || null,
         updated_at: new Date().toISOString(),
       };
       const { data, error } = await supabase.from(SETTINGS).upsert(payload, { onConflict: 'period_id' }).select('*').single();
       if (error) throw error;
       setSettings(data);
-      setNotice({ type: 'success', text: 'Đã lưu cấu hình công chuẩn cho kỳ.' });
+      setNotice({ type: 'success', text: 'Đã lưu công chuẩn thực tế của 3 nhóm cho Kỳ Lương này.' });
     } catch (error) { setNotice({ type: 'error', text: `Không lưu được cấu hình: ${errorText(error)}` }); }
     finally { setSaving(false); }
   }
 
-  async function saveEmployeeStandard(snapshot) {
-    if (!canEdit) return;
-    const type = employeeType;
-    const daysValue = type === 'NONE' ? null : Number(employeeDays);
-    if (type !== 'NONE' && (!Number.isFinite(daysValue) || daysValue <= 0 || daysValue > 31)) {
-      setNotice({ type: 'error', text: 'Công chuẩn nhân sự phải lớn hơn 0 và không vượt quá 31.' }); return;
-    }
-    setSaving(true);
-    try {
-      const { error } = await supabase.from(SNAPSHOTS).update({ standard_type: type, standard_days: daysValue }).eq('id', snapshot.id).eq('period_id', periodId);
-      if (error) throw error;
-      setSnapshots((old) => old.map((s) => s.id === snapshot.id ? { ...s, standard_type: type, standard_days: daysValue } : s));
-      setEditingEmployee(''); setNotice({ type: 'success', text: `Đã cập nhật công chuẩn cho ${snapshot.employee_name_snapshot}.` });
-    } catch (error) { setNotice({ type: 'error', text: `Không cập nhật được công chuẩn: ${errorText(error)}` }); }
-    finally { setSaving(false); }
-  }
 
   async function saveAttendance(snapshot, date, code) {
     if (!canEdit) return;
@@ -248,6 +244,33 @@ export default function Page() {
       }
       setNotice({ type: 'success', text: `Đã lưu ${snapshot.employee_code_snapshot} · ${workDate}.` });
     } catch (error) { setNotice({ type: 'error', text: `Không lưu được chấm công: ${errorText(error)}` }); }
+    finally { setSaving(false); }
+  }
+
+  async function syncStandardAttendance() {
+    if (!canEdit || !selectedPeriod) return;
+    if (!presentCode || !sundayCode) { setNotice({ type: 'error', text: 'Hãy chọn rõ mã công Có mặt và mã công Nghỉ Chủ nhật trước khi đồng bộ.' }); return; }
+    const unknown = rows.filter(r => r.type === 'UNKNOWN');
+    if (unknown.length) { setNotice({ type: 'error', text: `${unknown.length} nhân sự chưa có định mức 26, 28 hoặc 0 trong Định Mức Ngày Công. Hãy xử lý trước khi đồng bộ.` }); return; }
+    const candidates = [];
+    for (const row of rows) {
+      if (row.type === 'NONE') continue;
+      for (const date of days) {
+        const key = `${row.snapshot.employee_id}|${dateKey(date)}`;
+        if (recordMap.has(key)) continue; // never overwrite accountant-edited cells
+        const code = date.getDay() === 0 ? sundayCode : presentCode;
+        candidates.push({ period_id: periodId, employee_id: row.snapshot.employee_id, work_date: dateKey(date), attendance_code: code });
+      }
+    }
+    if (!candidates.length) { setNotice({ type: 'success', text: 'Không có ô trống cần đồng bộ. Dữ liệu đã nhập được giữ nguyên.' }); return; }
+    if (!window.confirm(`Đồng bộ ${candidates.length} ô trống? Thứ Hai đến thứ Bảy sẽ dùng mã Có mặt; Chủ nhật dùng mã Nghỉ Chủ nhật. Không ghi đè bất kỳ ô nào đã có dữ liệu.`)) return;
+    setSaving(true); setNotice(null);
+    try {
+      const { error } = await supabase.from(RECORDS).upsert(candidates, { onConflict: 'period_id,employee_id,work_date', ignoreDuplicates: true });
+      if (error) throw error;
+      await loadPeriodData(periodId);
+      setNotice({ type: 'success', text: `Đã đồng bộ ${candidates.length} ô trống. Các ô đã nhập trước đó được giữ nguyên.` });
+    } catch (error) { setNotice({ type: 'error', text: `Không đồng bộ được công chuẩn: ${errorText(error)}` }); }
     finally { setSaving(false); }
   }
 
@@ -278,8 +301,10 @@ export default function Page() {
   }
 
   const rows = useMemo(() => snapshots.map((s) => {
-    const type = s.standard_type || defaultType;
-    const standard = type === 'NONE' ? null : (s.standard_days == null ? Number(defaultDays || (type === '28' ? 28 : 26)) : Number(s.standard_days));
+    const normRow = workdayNorms.find(n => n.employee_id === s.employee_id);
+    const rawNorm = normRow?.workday_count == null ? null : Number(normRow.workday_count);
+    const type = rawNorm === 26 ? '26' : rawNorm === 28 ? '28' : rawNorm === 0 ? 'NONE' : 'UNKNOWN';
+    const standard = type === '26' ? Number(settings?.standard_26_days ?? 26) : type === '28' ? Number(settings?.standard_28_days ?? 28) : null;
     const employeeRecords = records.filter((r) => r.employee_id === s.employee_id);
     const enteredCount = employeeRecords.length;
     const counted = employeeRecords.reduce((sum, r) => {
@@ -290,16 +315,18 @@ export default function Page() {
     const complete = days.length > 0 && days.every((d) => recordMap.has(`${s.employee_id}|${dateKey(d)}`));
     let status = 'Chưa đủ dữ liệu';
     if (type === 'NONE') status = 'Không áp dụng';
+    else if (type === 'UNKNOWN') status = 'Thiếu định mức';
     else if (complete && !hasUnconfigured && standard > 0) status = counted >= standard ? 'Đủ công' : 'Thiếu công';
-    return { snapshot: s, type, standard, enteredCount, counted, complete, hasUnconfigured, status };
+    return { snapshot: s, type, standard, rawNorm, enteredCount, counted, complete, hasUnconfigured, status };
   }).filter((r) => {
     const text = norm(`${r.snapshot.employee_code_snapshot} ${r.snapshot.employee_name_snapshot} ${r.snapshot.department_snapshot || ''}`);
     if (search && !text.includes(norm(search))) return false;
+    if (groupFilter !== 'ALL' && r.type !== groupFilter) return false;
     if (filter === 'ENTERED' && r.enteredCount === 0) return false;
     if (filter === 'MISSING' && r.enteredCount > 0) return false;
     if (filter !== 'ALL' && !['ENTERED', 'MISSING'].includes(filter) && r.status !== filter) return false;
     return true;
-  }), [snapshots, records, codeMap, recordMap, days, defaultType, defaultDays, search, filter]);
+  }), [snapshots, workdayNorms, settings, records, codeMap, recordMap, days, search, filter, groupFilter]);
 
   const totals = useMemo(() => ({
     employees: snapshots.length,
@@ -320,8 +347,8 @@ export default function Page() {
           'Mã Nhân Viên': s.employee_code_snapshot,
           'Họ và Tên': s.employee_name_snapshot,
           'Ngày chấm công': dateKey(date), 'Mã công': r?.attendance_code || '', 'Ghi chú': r?.note || '',
-          'Loại công chuẩn': s.standard_type || defaultType,
-          'Công chuẩn tháng': s.standard_type === 'NONE' ? '' : (s.standard_days ?? defaultDays),
+          'Loại công chuẩn': (() => { const n = workdayNorms.find(x => x.employee_id === s.employee_id)?.workday_count; return n === 26 ? 'Nhóm 26 ngày' : n === 28 ? 'Nhóm 28 ngày' : n === 0 ? 'Không tính công' : 'Thiếu định mức'; })(),
+          'Công chuẩn tháng': (() => { const n = workdayNorms.find(x => x.employee_id === s.employee_id)?.workday_count; return n === 26 ? settings?.standard_26_days ?? 26 : n === 28 ? settings?.standard_28_days ?? 28 : ''; })(),
         });
       }
     }
@@ -409,14 +436,14 @@ export default function Page() {
         <div className="da-metric"><span>Đủ công / Thiếu công</span><strong>{totals.complete} / {totals.missing}</strong></div>
       </div>
       <section className="panel da-config-panel">
-        <div className="da-section-heading"><div><h3><Settings2 size={17}/> Cấu hình chấm công chuẩn</h3><p>Cấu hình riêng cho kỳ đang chọn; có thể điều chỉnh công chuẩn thực tế theo tháng.</p></div><button className="btn btn-secondary" onClick={() => setShowConfig((v) => !v)}>{showConfig ? 'Thu gọn' : 'Mở cấu hình'}</button></div>
+        <div className="da-section-heading"><div><h3><Settings2 size={17}/> Cấu hình chấm công chuẩn</h3><p>Đối chiếu công chuẩn từ Định Mức Ngày Công và điều chỉnh công chuẩn thực tế của từng nhóm cho kỳ này.</p></div><button className="btn btn-secondary" onClick={() => setShowConfig((v) => !v)}>{showConfig ? 'Thu gọn' : 'Mở cấu hình'}</button></div>
         {showConfig && <form className="da-config-form" onSubmit={saveSettings}>
-          <label><span>Loại công chuẩn mặc định</span><select value={defaultType} onChange={(e) => { setDefaultType(e.target.value); if (e.target.value === '26') setDefaultDays('26'); if (e.target.value === '28') setDefaultDays('28'); }} disabled={!canEdit}><option value="26">Công chuẩn 26 ngày</option><option value="28">Công chuẩn 28 ngày</option><option value="NONE">Không chấm công ngày</option></select></label>
-          <label><span>Công chuẩn thực tế tháng</span><input type="number" min="1" max="31" step="0.5" value={defaultDays} onChange={(e) => setDefaultDays(e.target.value)} disabled={!canEdit || defaultType === 'NONE'} placeholder="Ví dụ 26 hoặc 28"/></label>
+          <label><span>Nhóm 26 ngày — công chuẩn thực tế</span><input type="number" min="0.5" max="31" step="0.5" value={standard26Days} onChange={(e) => setStandard26Days(e.target.value)} disabled={!canEdit} required/></label>
+          <label><span>Nhóm 28 ngày — công chuẩn thực tế</span><input type="number" min="0.5" max="31" step="0.5" value={standard28Days} onChange={(e) => setStandard28Days(e.target.value)} disabled={!canEdit} required/></label>
           <label className="da-note-field"><span>Ghi chú</span><input value={configNote} onChange={(e) => setConfigNote(e.target.value)} disabled={!canEdit} placeholder="Ví dụ: Công chuẩn điều chỉnh theo kế hoạch tháng"/></label>
-          <button className="btn btn-primary" disabled={!canEdit || saving}><Save size={14}/> Lưu cấu hình</button>
+          <button className="btn btn-primary" disabled={!canEdit || saving}><Save size={14}/> Lưu cấu hình kỳ</button>
         </form>}
-        <p className="da-help">Công chuẩn không tự tăng/giảm theo số ngày lịch. Nếu nhân sự có chế độ khác, có thể điều chỉnh loại và số công tại từng dòng nhân sự.</p>
+        <p className="da-help">Nhóm của từng nhân sự được lấy từ Định Mức Ngày Công theo chính sách gắn với Kỳ Lương. Nhóm không tính công có định mức 0; không chỉnh công chuẩn từng nhân sự tại đây.</p>
       </section>
       <section className="panel da-codes-panel">
         <div className="da-section-heading"><div><h3><FileSpreadsheet size={17}/> Danh mục mã công</h3><p>Chỉ hệ số đã được cấu hình mới được cộng vào công thực tế. Để trống hệ số nếu chưa chốt quy đổi.</p></div></div>
@@ -430,11 +457,11 @@ export default function Page() {
         <div className="da-code-list">{codes.map((c) => <div key={c.id} className="da-code-item"><strong>{c.code}</strong><span>{c.label}</span><small>{c.work_units == null ? 'Chưa cấu hình quy đổi' : `${formatNumber(c.work_units)} công`}</small>{c.requires_note && <small>Cần ghi chú</small>}{canEdit && <button className="icon-button" title="Ngừng sử dụng mã" onClick={() => deactivateCode(c)}><Trash2 size={14}/></button>}</div>)}{!codes.length && <p className="da-muted">Chưa có mã công. Hãy thêm mã và chỉ nhập hệ số sau khi đã thống nhất quy tắc quy đổi.</p>}</div>
       </section>
       <section className="panel da-table-panel">
-        <div className="da-section-heading"><div><h3><CalendarDays size={17}/> Bảng chấm công theo ngày</h3><p>{snapshots.length} nhân sự trong danh sách chốt · {days.length} ngày · dữ liệu theo kỳ đang chọn.</p></div><div className="da-actions"><button className="btn btn-secondary" onClick={downloadTemplate} disabled={!snapshots.length}><Download size={14}/> Template</button><label className={`btn btn-secondary da-upload ${!canEdit || importing ? 'disabled' : ''}`}><Upload size={14}/> {importing ? 'Đang nhập…' : 'Import'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!canEdit || importing || !snapshots.length} onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }}/></label><button className="btn btn-secondary" onClick={exportAttendance} disabled={!snapshots.length}><Download size={14}/> Export</button></div></div>
-        <div className="da-filters"><label className="da-search"><Search size={15}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên…"/></label><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="ALL">Tất cả trạng thái</option><option value="ENTERED">Đã nhập chấm công</option><option value="MISSING">Chưa nhập chấm công</option><option value="Đủ công">Đủ công</option><option value="Thiếu công">Thiếu công</option><option value="Chưa đủ dữ liệu">Chưa đủ dữ liệu</option><option value="Không áp dụng">Không áp dụng</option></select></div>
+        <div className="da-section-heading"><div><h3><CalendarDays size={17}/> Bảng chấm công theo ngày</h3><p>{snapshots.length} nhân sự trong danh sách chốt · {days.length} ngày · dữ liệu theo kỳ đang chọn.</p></div><div className="da-actions"><label className="da-code-map">Mã Có mặt<select value={presentCode} onChange={e => setPresentCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><label className="da-code-map">Mã nghỉ CN<select value={sundayCode} onChange={e => setSundayCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><button className="btn btn-primary" onClick={syncStandardAttendance} disabled={!canEdit || saving || !snapshots.length}><CalendarDays size={14}/> Đồng bộ công chuẩn</button><button className="btn btn-secondary" onClick={downloadTemplate} disabled={!snapshots.length}><Download size={14}/> Template</button><label className={`btn btn-secondary da-upload ${!canEdit || importing ? 'disabled' : ''}`}><Upload size={14}/> {importing ? 'Đang nhập…' : 'Import'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!canEdit || importing || !snapshots.length} onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }}/></label><button className="btn btn-secondary" onClick={exportAttendance} disabled={!snapshots.length}><Download size={14}/> Export</button></div></div>
+        <div className="da-filters"><label className="da-search"><Search size={15}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên…"/></label><select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="ALL">Tất cả nhóm công</option><option value="26">Nhóm 26 ngày</option><option value="28">Nhóm 28 ngày</option><option value="NONE">Nhóm không tính công</option><option value="UNKNOWN">Thiếu định mức</option></select><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="ALL">Tất cả trạng thái</option><option value="ENTERED">Đã nhập chấm công</option><option value="MISSING">Chưa nhập chấm công</option><option value="Đủ công">Đủ công</option><option value="Thiếu công">Thiếu công</option><option value="Chưa đủ dữ liệu">Chưa đủ dữ liệu</option><option value="Không áp dụng">Không áp dụng</option><option value="Thiếu định mức">Thiếu định mức</option></select></div>
         {!snapshots.length ? <div className="da-snapshot-empty"><Users size={27}/><h3>Chưa có danh sách nhân sự chốt cho kỳ này</h3><p>Không tự lấy nhân sự hiện tại làm snapshot. Nếu đây là kỳ cũ chưa có snapshot, hãy đối chiếu danh sách trước khi chốt từ Employee Master hiện tại.</p><button className="btn btn-primary" onClick={createSnapshot} disabled={!canEdit || saving || !employees.length}><Users size={14}/> Chốt danh sách nhân sự cho kỳ</button><small>Thao tác cần xác nhận và không thể tự động đồng bộ lại theo Employee Master.</small></div> : <div className="da-table-wrap"><table className="da-table"><thead><tr><th className="da-sticky-col da-sticky-one">Mã NV</th><th className="da-sticky-col da-sticky-two">Họ và tên</th><th>Loại chuẩn</th><th>Chuẩn</th>{days.map((d) => <th key={dateKey(d)} className={`${[0,6].includes(d.getDay()) ? 'weekend' : ''} da-day-head`}><span>{d.toLocaleDateString('vi-VN', { weekday: 'short' })}</span><strong>{String(d.getDate()).padStart(2, '0')}</strong></th>)}<th>Công thực tế</th><th>Tỷ lệ</th><th>Đánh giá</th></tr></thead><tbody>{rows.map((row) => {
           const s = row.snapshot;
-          return <tr key={s.id}><td className="da-sticky-col da-sticky-one"><strong>{s.employee_code_snapshot}</strong></td><td className="da-sticky-col da-sticky-two"><strong>{s.employee_name_snapshot}</strong><small>{s.department_snapshot || ''}</small></td><td>{editingEmployee === s.id ? <select className="da-mini-select" value={employeeType} onChange={(e) => { setEmployeeType(e.target.value); if (e.target.value === '26') setEmployeeDays('26'); if (e.target.value === '28') setEmployeeDays('28'); }}><option value="26">26 ngày</option><option value="28">28 ngày</option><option value="NONE">Không chấm</option></select> : (STANDARD_TYPES.find((x) => x.value === row.type)?.label || row.type)}</td><td>{editingEmployee === s.id ? <input className="da-mini-number" type="number" min="1" max="31" step="0.5" value={employeeDays} disabled={employeeType === 'NONE'} onChange={(e) => setEmployeeDays(e.target.value)}/> : formatNumber(row.standard, 1)}</td>{days.map((date) => { const record = recordMap.get(`${s.employee_id}|${dateKey(date)}`); return <td key={dateKey(date)} className={`${[0,6].includes(date.getDay()) ? 'weekend' : ''} da-cell`}>{row.type === 'NONE' ? <span className="da-not-applicable">—</span> : <select aria-label={`${s.employee_code_snapshot} ${dateKey(date)}`} value={record?.attendance_code || ''} disabled={!canEdit || !codes.length} onChange={(e) => saveAttendance(s, date, e.target.value)} title={record?.note || ''}><option value="">—</option>{codes.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}</select>}</td>})}<td><strong>{row.type === 'NONE' ? '—' : formatNumber(row.counted, 2)}</strong>{row.hasUnconfigured && <small className="da-warning-text">Có mã chưa quy đổi</small>}</td><td>{row.type === 'NONE' || !row.standard ? '—' : `${formatNumber(row.counted / row.standard * 100, 2)}%`}</td><td><span className={`da-result ${row.status === 'Đủ công' ? 'good' : row.status === 'Thiếu công' ? 'bad' : row.status === 'Không áp dụng' ? 'na' : 'pending'}`}>{row.status}</span>{canEdit && <button className="da-row-edit" onClick={() => { setEditingEmployee(editingEmployee === s.id ? '' : s.id); setEmployeeType(row.type); setEmployeeDays(row.standard == null ? '' : String(row.standard)); }}>{editingEmployee === s.id ? 'Đóng' : 'Sửa chuẩn'}</button>}{editingEmployee === s.id && <button className="da-row-save" disabled={saving} onClick={() => saveEmployeeStandard(s)}><Save size={12}/> Lưu chuẩn</button>}</td></tr>;
+          return <tr key={s.id}><td className="da-sticky-col da-sticky-one"><strong>{s.employee_code_snapshot}</strong></td><td className="da-sticky-col da-sticky-two"><strong>{s.employee_name_snapshot}</strong><small>{s.department_snapshot || ''}</small></td><td>{row.type === 'UNKNOWN' ? <span className="da-warning-text">Thiếu định mức</span> : (STANDARD_TYPES.find((x) => x.value === row.type)?.label || row.type)}</td><td>{formatNumber(row.standard, 1)}</td>{days.map((date) => { const record = recordMap.get(`${s.employee_id}|${dateKey(date)}`); return <td key={dateKey(date)} className={`${[0,6].includes(date.getDay()) ? 'weekend' : ''} da-cell`}>{row.type === 'NONE' ? <span className="da-not-applicable">—</span> : <select aria-label={`${s.employee_code_snapshot} ${dateKey(date)}`} value={record?.attendance_code || ''} disabled={!canEdit || !codes.length} onChange={(e) => saveAttendance(s, date, e.target.value)} title={record?.note || ''}><option value="">—</option>{codes.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}</select>}</td>})}<td><strong>{row.type === 'NONE' ? '—' : formatNumber(row.counted, 2)}</strong>{row.hasUnconfigured && <small className="da-warning-text">Có mã chưa quy đổi</small>}</td><td>{row.type === 'NONE' || !row.standard ? '—' : `${formatNumber(row.counted / row.standard * 100, 2)}%`}</td><td><span className={`da-result ${row.status === 'Đủ công' ? 'good' : row.status === 'Thiếu công' ? 'bad' : row.status === 'Không áp dụng' ? 'na' : 'pending'}`}>{row.status}</span></td></tr>;
         })}{!rows.length && <tr><td colSpan={days.length + 7} className="da-no-rows">Không có nhân sự phù hợp bộ lọc.</td></tr>}</tbody></table></div>}
         <div className="da-footer">Hiển thị {rows.length}/{snapshots.length} nhân sự · Ô trống là chưa nhập, không tự động được hiểu là vắng mặt. Công thực tế chỉ cộng hệ số đã cấu hình.</div>
       </section>
