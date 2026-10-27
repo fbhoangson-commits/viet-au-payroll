@@ -17,6 +17,7 @@ export const NAV_GROUPS = [
   { title: "DỮ LIỆU KỲ LƯƠNG", items: [
     { label: "Quản lý Kỳ Lương", slug: "payroll-periods", icon: "calendar-range" },
     { label: "Chấm công ngày", slug: "daily-attendance", icon: "calendar-check" },
+    { label: "Chấm Công Tiết Dạy", slug: "teaching-attendance", icon: "graduation-cap" },
     { label: "Dữ liệu Bảo Hiểm và Thuế", slug: "insurance-tax-data", icon: "shield-check" },
     { label: "Khoản Bổ Sung", slug: "payroll-adjustments", icon: "wallet" },
     { label: "Hỗ trợ nhân sự", slug: "employee-support", icon: "hand-heart" },
