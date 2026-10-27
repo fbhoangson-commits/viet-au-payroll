@@ -1,6 +1,6 @@
 import React from 'react';
-import FeaturePage from '../../shared/components/FeaturePage.jsx';
+import PayrollCalculationPage from '../payroll-calculation/PayrollCalculationPage.jsx';
 
 export default function Page() {
-  return <FeaturePage title={"Thuế TNCN"} description={"Tính và tổng hợp thuế thu nhập cá nhân theo kỳ."} />;
+  return <PayrollCalculationPage page="personal-income-tax" />;
 }

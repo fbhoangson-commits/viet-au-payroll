@@ -1,6 +1,6 @@
 import React from 'react';
-import FeaturePage from '../../shared/components/FeaturePage.jsx';
+import PayrollCalculationPage from '../payroll-calculation/PayrollCalculationPage.jsx';
 
 export default function Page() {
-  return <FeaturePage title={"Lương Tiết Dạy & Phụ Đạo"} description={"Tính tiền tiết dạy, phụ đạo và các nhóm khoản dạy khác."} />;
+  return <PayrollCalculationPage page="teaching-pay" />;
 }
