@@ -243,18 +243,19 @@ export default function PayrollCalculationPage({ page }) {
           const preferredRows=[
             ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
             ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
-            ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
-          ];
-          const rv=preferredRows.find(v=>clean(v.group_id)===clean(col.group_id));
-          const values=rv?.values && typeof rv.values==='object' ? rv.values : {};
+          ].filter(v=>clean(v.group_id)===clean(col.group_id));
           const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
-          let rate;
-          for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
-          if(rate===undefined){
+          const readRate=values=>{
+            const source=values&&typeof values==='object'?values:{};
+            for(const key of rateKeys) if(Object.prototype.hasOwnProperty.call(source,key)&&source[key]!==undefined&&source[key]!==null&&source[key]!=='') return source[key];
             const wanted=new Set(rateKeys.map(norm));
-            const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key)));
-            if(matchedKey!==undefined) rate=values[matchedKey];
-          }
+            const matchedKey=Object.keys(source).find(key=>wanted.has(norm(key)));
+            return matchedKey===undefined?undefined:source[matchedKey];
+          };
+          // Crucial: choose a row that actually contains this column's rate, not merely the first row in the group.
+          const rv=preferredRows.find(v=>readRate(v.values)!==undefined);
+          const values=rv?.values&&typeof rv.values==='object'?rv.values:{};
+          const rate=readRate(values);
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
