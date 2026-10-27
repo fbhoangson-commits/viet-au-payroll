@@ -124,7 +124,7 @@ export default function Page() {
       const code = editingId ? periods.find(p => p.id === editingId)?.code : makeCode(form.type === 'FIXED' ? 'FIXED' : 'EVENT', monthForCode, sameMonthCount + 1);
       const legacyMonth = form.type === 'FIXED' ? form.month : (form.start_date || today()).slice(0, 7);
       const [legacyYear, legacyMonthNumber] = legacyMonth.split('-').map(Number);
-      const payload = { code, period_code: code, type: form.type, name: form.name.trim(), salary_version_id: form.salary_version_id, month: form.type === 'FIXED' ? form.month : null, period_year: legacyYear, period_month: legacyMonthNumber, start_date: form.start_date || null, end_date: form.end_date || null, description: form.description.trim() || null, status: editingId ? (periods.find(p => p.id === editingId)?.status || 'DRAFT') : 'DRAFT', employee_count: editingId ? (periods.find(p => p.id === editingId)?.employee_count || 0) : currentEmployees.length, updated_at: new Date().toISOString() };
+      const payload = { code, period_code: code, type: form.type, name: form.name.trim(), salary_version_id: form.salary_version_id, month: form.type === 'FIXED' ? form.month : null, period_year: legacyYear, period_month: legacyMonthNumber, start_date: form.start_date || null, end_date: form.end_date || null, description: form.description.trim() || null, status: editingId ? form.status : 'DRAFT', employee_count: editingId ? (periods.find(p => p.id === editingId)?.employee_count || 0) : currentEmployees.length, updated_at: new Date().toISOString() };
       let result;
       if (editingId) result = await supabase.from(TABLE).update(payload).eq('id', editingId).select('*').single();
       else result = await supabase.from(TABLE).insert(payload).select('*').single();
@@ -156,9 +156,13 @@ export default function Page() {
     if (!supabase || period.status === nextStatus) return;
     const prompt = nextStatus === 'CLOSED' ? 'Đóng kỳ này? Hãy chắc chắn các thao tác nhập liệu đã hoàn tất.' : nextStatus === 'OPEN' ? 'Mở kỳ này để tiếp tục nhập liệu?' : 'Chuyển kỳ về bản nháp?';
     if (!window.confirm(prompt)) return;
+    // Clear previous alerts so a stale success message cannot remain beside a new error.
+    setError('');
+    setMessage('');
     const { error: updateError } = await supabase.from(TABLE).update({ status: nextStatus, updated_at: new Date().toISOString() }).eq('id', period.id);
     if (updateError) { setError(`Không cập nhật được trạng thái: ${updateError.message}`); return; }
-    setMessage(`Đã cập nhật trạng thái kỳ ${period.code}.`); await load(false);
+    setMessage(`Đã cập nhật trạng thái kỳ ${period.code}.`);
+    await load(false);
     if (selected?.id === period.id) setSelected({ ...period, status: nextStatus });
   };
 
@@ -272,7 +276,7 @@ export default function Page() {
         <label className="pp-form-wide">Chính Sách Lương áp dụng <span>*</span><select required value={form.salary_version_id} disabled={Boolean(editingId)} onChange={e => setForm(v => ({ ...v, salary_version_id: e.target.value }))}><option value="">-- Chọn chính sách lương --</option>{salaryPolicies.filter(p => String(p.status).toUpperCase() === 'ACTIVE' || p.id === form.salary_version_id).map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} ({dateLabel(p.effective_from)}{p.effective_to ? ` đến ${dateLabel(p.effective_to)}` : ' trở đi'})</option>)}</select>{!salaryPolicies.some(p => String(p.status).toUpperCase() === 'ACTIVE') && <small>Chưa có chính sách lương đang hoạt động. Hãy tạo/kích hoạt chính sách trước.</small>}</label>
         <label className="pp-form-wide">Tên kỳ <span>*</span><input required maxLength={180} value={form.name} placeholder={tab === 'FIXED' ? 'VD: Kỳ lương tháng 09/2026' : 'VD: Kỳ thưởng thành tích 2026'} onChange={e => setForm(v => ({ ...v, name: e.target.value }))}/></label>
         <label>Ngày bắt đầu<input type="date" value={form.start_date || ''} onChange={e => setForm(v => ({ ...v, start_date: e.target.value }))}/></label><label>Ngày kết thúc<input type="date" min={form.start_date || undefined} value={form.end_date || ''} onChange={e => setForm(v => ({ ...v, end_date: e.target.value }))}/></label>
-        <label>Trạng thái<input value={editingId ? (statusLabel[periods.find(p => p.id === editingId)?.status] || periods.find(p => p.id === editingId)?.status || 'Bản nháp') : 'Bản nháp'} disabled/><small>Trạng thái không thể thay đổi trong biểu mẫu này.</small></label>
+        <label>Trạng thái<select value={editingId ? form.status : 'DRAFT'} disabled={!editingId} onChange={e => setForm(v => ({ ...v, status: e.target.value }))}><option value="DRAFT">Bản nháp</option><option value="OPEN">Đang mở</option><option value="CLOSED">Đã đóng</option></select></label>
         <label className="pp-form-wide">Mô tả / mục đích<textarea rows={2} maxLength={1000} value={form.description} placeholder="Thông tin bổ sung (không bắt buộc)" onChange={e => setForm(v => ({ ...v, description: e.target.value }))}/></label>
         <div className="pp-form-actions pp-form-wide"><button className="pp-button primary" type="submit" disabled={saving || !isSupabaseConfigured}><Save size={15}/>{saving ? 'Đang lưu…' : editingId ? 'Lưu thay đổi' : 'Tạo kỳ nháp'}</button><button type="button" className="pp-button secondary" onClick={() => setShowForm(false)}>Hủy</button></div>
       </form></section>}
@@ -281,7 +285,7 @@ export default function Page() {
       <div className="pp-table-wrap"><table className="pp-table"><thead><tr><th>Mã kỳ</th><th>Tên kỳ</th><th>{tab === 'FIXED' ? 'Tháng lương' : 'Thời gian'}</th><th>Nhân sự</th><th>Trạng thái</th><th>Mô tả</th><th>Thao tác</th></tr></thead><tbody>
         {loading ? <tr><td colSpan="7" className="pp-empty">Đang tải dữ liệu từ Supabase…</td></tr> : visiblePeriods.length ? visiblePeriods.map(period => <tr key={period.id} className={selected?.id === period.id ? 'selected' : ''}>
           <td><strong>{period.code}</strong></td><td><span className="pp-period-name">{period.name}</span></td><td>{tab === 'FIXED' ? monthLabel(period.month) : `${dateLabel(period.start_date)} – ${dateLabel(period.end_date)}`}</td><td>{period.type === 'FIXED' ? <span className="pp-count"><Users size={13}/>{period.employee_count ?? '—'}</span> : <span className="pp-count"><Users size={13}/>{values.length && selected?.id === period.id ? values.length : '—'}</span>}</td>
-          <td><span className={`pp-status ${statusClass[period.status] || 'draft'}`}>{statusLabel[period.status] || period.status || 'Bản nháp'}</span></td><td className="pp-description">{period.description || '—'}</td><td><div className="pp-row-actions"><button className="pp-icon-button" title="Xem chi tiết" onClick={() => loadDetails(period)}><Eye size={15}/></button><button className="pp-icon-button" title="Sửa thông tin" onClick={() => openEdit(period)}><Edit3 size={15}/></button>{period.status === 'DRAFT' && <button className="pp-button small secondary" title="Mở kỳ để nhập liệu" onClick={() => changeStatus(period, 'OPEN')}>Mở kỳ</button>}{period.status === 'OPEN' && <button className="pp-button small secondary" title="Đóng kỳ" onClick={() => changeStatus(period, 'CLOSED')}>Đóng kỳ</button>}</div></td>
+          <td><span className={`pp-status ${statusClass[period.status] || 'draft'}`}>{statusLabel[period.status] || period.status || 'Bản nháp'}</span></td><td className="pp-description">{period.description || '—'}</td><td><div className="pp-row-actions"><button className="pp-icon-button" title="Xem chi tiết" onClick={() => loadDetails(period)}><Eye size={15}/></button><button className="pp-icon-button" title="Sửa thông tin" onClick={() => openEdit(period)}><Edit3 size={15}/></button>{period.status !== 'CLOSED' ? <button className="pp-button small secondary" onClick={() => changeStatus(period, 'CLOSED')}>Đóng kỳ</button> : <button className="pp-button small secondary" onClick={() => changeStatus(period, 'OPEN')}>Mở kỳ</button>}</div></td>
         </tr>) : <tr><td colSpan="7" className="pp-empty">{error ? 'Không thể hiển thị dữ liệu khi kết nối chưa sẵn sàng.' : 'Chưa có kỳ phù hợp. Bấm “Tạo Kỳ” để bắt đầu.'}</td></tr>}
       </tbody></table></div><p className="pp-footnote">Không có thao tác xóa cứng kỳ lương. Đóng kỳ chỉ thay đổi trạng thái quản lý; dữ liệu kỳ và liên kết lịch sử được giữ nguyên.</p>
     </section>
