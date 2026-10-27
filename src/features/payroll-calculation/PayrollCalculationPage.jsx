@@ -167,7 +167,7 @@ export default function PayrollCalculationPage({ page }) {
       const selectedRateColumns=columns.filter(c=>c.is_active!==false);
       const rateGroupName = c => norm(groupsById.get(clean(c.group_id))?.name || groupsById.get(clean(c.group_id))?.code || '');
       const isFixedGroup = c => { const n=rateGroupName(c); return n.includes('fixed') || n.includes('co dinh'); };
-      const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('teaching') || n.includes('tutoring'); };
+      const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('other') || n.includes('teaching') || n.includes('tutoring'); };
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
       const teachingColumns = selectedRateColumns.filter(isTeachingColumn);
       const dynamicLabels = Object.fromEntries([...fixedColumns.map(c=>[`fixedCol_${c.id}`,clean(c.name||c.label||c.code||'Cấu phần lương')]),...teachingColumns.map(c=>[`lesson_${c.id}`,clean(c.name||c.label||c.code||'Cột tiết')])]);
@@ -217,7 +217,7 @@ export default function PayrollCalculationPage({ page }) {
         for(const rv of rateRows){
           const group=groupsById.get(clean(rv.group_id));
           const groupName=norm(group?.name||group?.code||'');
-          if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName.includes('khac')||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
+          if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName.includes('khac')||groupName.includes('other')||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
           const vals=rv.values && typeof rv.values==='object' ? rv.values : {};
           for(const c of fixedColumns.filter(c=>clean(c.group_id)===clean(rv.group_id))){
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
@@ -234,7 +234,15 @@ export default function PayrollCalculationPage({ page }) {
           const recordRateRows=valuesByEmployee.get(employeeId(rec))||[];
           const allEmployeeRateRows=rateValues.filter(v=>employeeId(v)===employeeId(rec));
           const rv=recordRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||allEmployeeRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||rateRows.find(v=>clean(v.group_id)===clean(col.group_id));
-          const rate=rv?.values?.[col.id]??rv?.values?.[col.code]??rv?.values?.[col.name];
+          const rateValuesObject=rv?.values && typeof rv.values==='object' ? rv.values : {};
+          const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
+          let rate;
+          for(const key of rateKeys){ if(Object.prototype.hasOwnProperty.call(rateValuesObject,key) && rateValuesObject[key]!==undefined && rateValuesObject[key]!==null && rateValuesObject[key]!==''){ rate=rateValuesObject[key]; break; } }
+          if(rate===undefined){
+            const wanted=new Set(rateKeys.map(norm));
+            const matchedKey=Object.keys(rateValuesObject).find(key=>wanted.has(norm(key)));
+            if(matchedKey!==undefined) rate=rateValuesObject[matchedKey];
+          }
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
