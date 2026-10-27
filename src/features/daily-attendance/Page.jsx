@@ -68,7 +68,9 @@ export default function Page() {
   const [newCodeLabel, setNewCodeLabel] = useState('');
   const [newCodeUnits, setNewCodeUnits] = useState('');
   const [newCodeNote, setNewCodeNote] = useState(false);
-  const [newCodeColor, setNewCodeColor] = useState('#e8f8f1');
+  const [newCodeColor, setNewCodeColor] = useState('#16834a');
+  const [newCodeBold, setNewCodeBold] = useState(true);
+  const [syncProgress, setSyncProgress] = useState(null);
   const [importing, setImporting] = useState(false);
 
   const selectedPeriod = useMemo(() => periods.find((p) => p.id === periodId) || null, [periods, periodId]);
@@ -250,32 +252,52 @@ export default function Page() {
   }
 
   async function syncStandardAttendance() {
-    if (!canEdit || !selectedPeriod) return;
+    if (!canEdit || !selectedPeriod || saving || syncProgress) return;
     if (!presentCode || !sundayCode) { setNotice({ type: 'error', text: 'Hãy chọn rõ mã công Có mặt và mã công Nghỉ Chủ nhật trước khi đồng bộ.' }); return; }
-    const unknown = rows.filter(r => r.type === 'UNKNOWN');
-    if (unknown.length) { setNotice({ type: 'error', text: `${unknown.length} nhân sự chưa có định mức 26, 28 hoặc 0 trong Định Mức Ngày Công. Hãy xử lý trước khi đồng bộ.` }); return; }
-    const candidates = [];
-    for (const row of rows) {
-      if (row.type === 'NONE') continue;
+    if (!codeMap.has(presentCode) || !codeMap.has(sundayCode)) { setNotice({ type: 'error', text: 'Mã công được chọn không còn hợp lệ. Hãy làm mới danh mục mã công.' }); return; }
+
+    // Build from the complete period snapshot, never from UI-filtered rows.
+    const normByEmployee = new Map(workdayNorms.map(n => [n.employee_id, n.workday_count == null ? null : Number(n.workday_count)]));
+    const allCandidates = [];
+    let unknownCount = 0;
+    for (const snapshot of snapshots) {
+      const rawNorm = normByEmployee.get(snapshot.employee_id);
+      // Missing/zero standard is the agreed no-attendance group.
+      if (rawNorm == null || rawNorm === 0) continue;
+      if (rawNorm !== 26 && rawNorm !== 28) { unknownCount += 1; continue; }
       for (const date of days) {
-        const key = `${row.snapshot.employee_id}|${dateKey(date)}`;
-        if (recordMap.has(key)) continue; // never overwrite accountant-edited cells
-        const code = date.getDay() === 0 ? sundayCode : presentCode;
-        candidates.push({ period_id: periodId, employee_id: row.snapshot.employee_id, work_date: dateKey(date), attendance_code: code });
+        const key = `${snapshot.employee_id}|${dateKey(date)}`;
+        if (recordMap.has(key)) continue; // preserve all previously entered cells
+        allCandidates.push({ period_id: selectedPeriod.id, employee_id: snapshot.employee_id, work_date: dateKey(date), attendance_code: date.getDay() === 0 ? sundayCode : presentCode });
       }
     }
-    if (!candidates.length) { setNotice({ type: 'success', text: 'Không có ô trống cần đồng bộ. Dữ liệu đã nhập được giữ nguyên.' }); return; }
-    const totalCandidates = candidates.length;
-    const batch = candidates.slice(0, 1000);
-    if (!window.confirm(`Đồng bộ tối đa ${batch.length} ô trống trong lượt này${totalCandidates > 1000 ? ` (còn ${totalCandidates - 1000} ô sẽ chờ lượt tiếp theo)` : ''}? Thứ Hai đến thứ Bảy sẽ dùng mã Có mặt; Chủ nhật dùng mã Nghỉ Chủ nhật. Không ghi đè bất kỳ ô nào đã có dữ liệu.`)) return;
-    setSaving(true); setNotice(null);
+    if (unknownCount) { setNotice({ type: 'error', text: `${unknownCount} nhân sự có định mức khác 0, 26 hoặc 28. Hãy kiểm tra Định Mức Ngày Công trước khi đồng bộ.` }); return; }
+    if (!allCandidates.length) { setNotice({ type: 'success', text: 'Không có ô trống cần đồng bộ. Các ô đã nhập được giữ nguyên.' }); return; }
+    if (!window.confirm(`Đồng bộ ${allCandidates.length.toLocaleString('vi-VN')} ô trống của kỳ ${periodLabel(selectedPeriod)}? Hệ thống sẽ tự chia thành nhiều đợt xử lý; không ghi đè ô đã có dữ liệu.`)) return;
+
+    const batchSize = 400; // safely below common PostgREST payload/row limits
+    const total = allCandidates.length;
+    let processed = 0;
+    setSaving(true); setSyncProgress({ processed: 0, total }); setNotice(null);
     try {
-      const { error } = await supabase.from(RECORDS).upsert(batch, { onConflict: 'period_id,employee_id,work_date', ignoreDuplicates: true });
-      if (error) throw error;
-      await loadPeriodData(periodId);
-      setNotice({ type: 'success', text: `Đã đồng bộ ${batch.length} ô (giới hạn 1.000 ô/lượt).${totalCandidates > batch.length ? ` Còn ${totalCandidates - batch.length} ô trống; bấm Đồng bộ công chuẩn lần nữa để tiếp tục.` : ''} Các ô đã nhập trước đó được giữ nguyên.` });
-    } catch (error) { setNotice({ type: 'error', text: `Không đồng bộ được công chuẩn: ${errorText(error)}` }); }
-    finally { setSaving(false); }
+      for (let offset = 0; offset < total; offset += batchSize) {
+        // Stop if the user switched periods while an async request was in flight.
+        if (selectedPeriod.id !== periodId) throw new Error('Kỳ lương đã thay đổi trong lúc đồng bộ. Hãy làm mới dữ liệu trước khi tiếp tục.');
+        const batch = allCandidates.slice(offset, offset + batchSize);
+        const { error } = await supabase.from(RECORDS).upsert(batch, {
+          onConflict: 'period_id,employee_id,work_date',
+          ignoreDuplicates: true,
+        });
+        if (error) throw new Error(`Đã xử lý ${processed.toLocaleString('vi-VN')}/${total.toLocaleString('vi-VN')} ô. Đợt tiếp theo gặp lỗi: ${errorText(error)}`);
+        processed += batch.length;
+        setSyncProgress({ processed, total });
+      }
+      await loadPeriodData(selectedPeriod.id);
+      setNotice({ type: 'success', text: `Đã xử lý đồng bộ ${processed.toLocaleString('vi-VN')} ô trống qua ${Math.ceil(total / batchSize)} đợt. Các ô đã có dữ liệu được giữ nguyên.` });
+    } catch (error) {
+      try { await loadPeriodData(selectedPeriod.id); } catch { /* preserve original sync error */ }
+      setNotice({ type: 'error', text: `Đồng bộ chưa hoàn tất: ${errorText(error)}. Các đợt đã lưu vẫn được giữ; hãy kiểm tra dữ liệu rồi chạy lại để xử lý các ô còn trống.` });
+    } finally { setSaving(false); setSyncProgress(null); }
   }
 
   async function addCode(event) {
@@ -286,22 +308,23 @@ export default function Page() {
     const units = newCodeUnits.trim() === '' ? null : Number(newCodeUnits);
     if (units !== null && (!Number.isFinite(units) || units < 0 || units > 1)) { setNotice({ type: 'error', text: 'Hệ số công phải từ 0 đến 1 hoặc để trống nếu chưa chốt quy đổi.' }); return; }
     try {
-      const { data, error } = await supabase.from(CODES).insert({ code, label, work_units: units, color: newCodeColor, requires_note: newCodeNote, is_active: true, display_order: codes.length + 1 }).select('*').single();
+      const { data, error } = await supabase.from(CODES).insert({ code, label, work_units: units, color: newCodeColor, is_bold: newCodeBold, requires_note: newCodeNote, is_active: true, display_order: codes.length + 1 }).select('*').single();
       if (error) throw error;
       setCodes((prev) => [...prev, data].sort((a, b) => Number(a.display_order) - Number(b.display_order)));
-      setNewCode(''); setNewCodeLabel(''); setNewCodeUnits(''); setNewCodeNote(false); setNewCodeColor('#e8f8f1');
+      setNewCode(''); setNewCodeLabel(''); setNewCodeUnits(''); setNewCodeNote(false); setNewCodeColor('#16834a'); setNewCodeBold(true);
       setNotice({ type: 'success', text: `Đã thêm mã công ${code}.` });
     } catch (error) { setNotice({ type: 'error', text: `Không thêm được mã công: ${errorText(error)}` }); }
   }
 
-  async function updateCodeColor(code, color) {
-    if (!canEdit || !color) return;
+  async function updateCodeStyle(code, patch) {
+    if (!canEdit || !code?.id) return;
     try {
-      const { error } = await supabase.from(CODES).update({ color, updated_at: new Date().toISOString() }).eq('id', code.id);
+      const payload = { ...patch, updated_at: new Date().toISOString() };
+      const { error } = await supabase.from(CODES).update(payload).eq('id', code.id);
       if (error) throw error;
-      setCodes(prev => prev.map(item => item.id === code.id ? { ...item, color } : item));
-      setNotice({ type: 'success', text: `Đã cập nhật màu cho mã ${code.code}.` });
-    } catch (error) { setNotice({ type: 'error', text: `Không cập nhật được màu mã công: ${errorText(error)}` }); }
+      setCodes(prev => prev.map(item => item.id === code.id ? { ...item, ...patch } : item));
+      setNotice({ type: 'success', text: `Đã cập nhật kiểu hiển thị mã ${code.code}.` });
+    } catch (error) { setNotice({ type: 'error', text: `Không cập nhật được kiểu hiển thị mã công: ${errorText(error)}` }); }
   }
 
   async function deactivateCode(code) {
@@ -435,7 +458,7 @@ export default function Page() {
   return <section className="feature-page daily-attendance-page">
     <div className="feature-heading"><div className="feature-heading-icon"><CalendarDays size={22}/></div><div><div className="eyebrow">KHÔNG GIAN NGHIỆP VỤ</div><h2>Chấm công ngày</h2><p>Nhập, đối chiếu và tổng hợp công theo Kỳ Lương đang chọn.</p></div></div>
     <div className="da-toolbar panel">
-      <label className="da-period-field"><span>Kỳ Lương <b>*</b></span><select value={periodId} onChange={(e) => setPeriodId(e.target.value)} disabled={loading || !periods.length}><option value="">{periods.length ? 'Chọn Kỳ Lương' : 'Chưa có Kỳ Lương'}</option>{periods.map((p) => <option key={p.id} value={p.id}>{periodLabel(p)} · {p.status}</option>)}</select></label>
+      <label className="da-period-field"><span>Kỳ Lương <b>*</b></span><select value={periodId} onChange={(e) => setPeriodId(e.target.value)} disabled={loading || saving || !periods.length}><option value="">{periods.length ? 'Chọn Kỳ Lương' : 'Chưa có Kỳ Lương'}</option>{periods.map((p) => <option key={p.id} value={p.id}>{periodLabel(p)} · {p.status}</option>)}</select></label>
       <div className="da-period-summary">{selectedPeriod ? <><strong>{periodLabel(selectedPeriod)}</strong><span>{monthLabel(selectedPeriod.period_year, selectedPeriod.period_month)} · {days.length} ngày trong tháng</span><span className={`da-status ${isLocked ? 'locked' : ''}`}>{isLocked ? 'Đã khóa' : selectedPeriod.status || 'Chưa xác định trạng thái'}</span></> : <span>Chọn kỳ để bắt đầu.</span>}</div>
       <button className="btn btn-secondary" onClick={refresh} disabled={loading}><RefreshCw size={14}/> Làm mới</button>
     </div>
@@ -465,18 +488,24 @@ export default function Page() {
           <label><span>Mã công</span><input value={newCode} onChange={(e) => setNewCode(e.target.value)} maxLength={12} placeholder="VD: X, P, K" required disabled={!canEdit}/></label>
           <label><span>Tên mã công</span><input value={newCodeLabel} onChange={(e) => setNewCodeLabel(e.target.value)} placeholder="VD: Đi làm" required disabled={!canEdit}/></label>
           <label><span>Hệ số công</span><input type="number" min="0" max="1" step="0.5" value={newCodeUnits} onChange={(e) => setNewCodeUnits(e.target.value)} placeholder="Để trống nếu chưa chốt" disabled={!canEdit}/></label>
-          <label><span>Màu trạng thái</span><input type="color" value={newCodeColor} onChange={(e) => setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Màu trạng thái mã công"/></label>
+          <label><span>Màu chữ</span><div className="da-color-input"><input type="color" value={newCodeColor} onChange={(e) => setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Màu chữ mã công"/><input type="text" value={newCodeColor.toUpperCase()} maxLength={7} pattern="^#[0-9A-Fa-f]{6}$" onChange={(e) => /^#[0-9A-Fa-f]{6}$/.test(e.target.value) && setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Mã màu HEX"/></div></label><label className="da-checkbox"><input type="checkbox" checked={newCodeBold} onChange={(e) => setNewCodeBold(e.target.checked)} disabled={!canEdit}/> Chữ đậm</label>
           <label className="da-checkbox"><input type="checkbox" checked={newCodeNote} onChange={(e) => setNewCodeNote(e.target.checked)} disabled={!canEdit}/> Yêu cầu ghi chú</label>
           <button className="btn btn-primary" disabled={!canEdit}><Plus size={14}/> Thêm mã</button>
         </form>
-        <div className="da-code-list">{codes.map((c) => <div key={c.id} className="da-code-item" style={{ backgroundColor: c.color || '#e8f8f1', borderColor: c.color || '#dceee7' }}><strong>{c.code}</strong><span>{c.label}</span><small>{c.work_units == null ? 'Chưa cấu hình quy đổi' : `${formatNumber(c.work_units)} công`}</small>{c.requires_note && <small>Cần ghi chú</small>}{canEdit && <input className="da-color-picker" type="color" value={c.color || '#e8f8f1'} title={`Đổi màu mã ${c.code}`} aria-label={`Đổi màu mã ${c.code}`} onChange={(e) => updateCodeColor(c, e.target.value)}/>}{canEdit && <button className="icon-button" title="Ngừng sử dụng mã" onClick={() => deactivateCode(c)}><Trash2 size={14}/></button>}</div>)}{!codes.length && <p className="da-muted">Chưa có mã công. Hãy thêm mã và chỉ nhập hệ số sau khi đã thống nhất quy tắc quy đổi.</p>}</div>
+        <div className="da-code-list">{codes.map((c) => <div key={c.id} className="da-code-item">
+          <span className="da-code-preview" style={{ color: c.color || '#475569', fontWeight: c.is_bold === false ? 500 : 750 }}>{c.code}</span>
+          <span className="da-code-label">{c.label}<small>{c.work_units == null ? 'Chưa cấu hình quy đổi' : `${formatNumber(c.work_units)} công`}{c.requires_note ? ' · Cần ghi chú' : ''}</small></span>
+          {canEdit && <label className="da-code-style-control" title={`Màu chữ mã ${c.code}`}><input type="color" value={/^#[0-9A-Fa-f]{6}$/.test(c.color || '') ? c.color : '#475569'} aria-label={`Màu chữ mã ${c.code}`} onChange={(e) => updateCodeStyle(c, { color: e.target.value })}/><input type="text" defaultValue={(c.color || '#475569').toUpperCase()} maxLength={7} aria-label={`HEX mã ${c.code}`} onBlur={(e) => { const value = e.target.value.trim(); if (/^#[0-9A-Fa-f]{6}$/.test(value) && value.toLowerCase() !== (c.color || '#475569').toLowerCase()) updateCodeStyle(c, { color: value }); else e.target.value = (c.color || '#475569').toUpperCase(); }}/></label>}
+          {canEdit && <label className="da-code-bold"><input type="checkbox" checked={c.is_bold !== false} onChange={(e) => updateCodeStyle(c, { is_bold: e.target.checked })}/> Đậm</label>}
+          {canEdit && <button type="button" className="btn btn-ghost btn-icon" title="Ngừng sử dụng mã" onClick={() => deactivateCode(c)}><Trash2 size={14}/></button>}
+        </div>)}{!codes.length && <p className="da-muted">Chưa có mã công. Hãy thêm mã và chỉ nhập hệ số sau khi đã thống nhất quy tắc quy đổi.</p>}</div>
       </section>
       <section className="panel da-table-panel">
-        <div className="da-section-heading"><div><h3><CalendarDays size={17}/> Bảng chấm công theo ngày</h3><p>{snapshots.length} nhân sự trong danh sách chốt · {days.length} ngày · dữ liệu theo kỳ đang chọn.</p></div><div className="da-actions"><label className="da-code-map">Mã Có mặt<select value={presentCode} onChange={e => setPresentCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><label className="da-code-map">Mã nghỉ CN<select value={sundayCode} onChange={e => setSundayCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><button className="btn btn-primary" onClick={syncStandardAttendance} disabled={!canEdit || saving || !snapshots.length}><CalendarDays size={14}/> Đồng bộ công chuẩn</button><button className="btn btn-secondary" onClick={downloadTemplate} disabled={!snapshots.length}><Download size={14}/> Template</button><label className={`btn btn-secondary da-upload ${!canEdit || importing ? 'disabled' : ''}`}><Upload size={14}/> {importing ? 'Đang nhập…' : 'Import'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!canEdit || importing || !snapshots.length} onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }}/></label><button className="btn btn-secondary" onClick={exportAttendance} disabled={!snapshots.length}><Download size={14}/> Export</button></div></div>
+        <div className="da-section-heading"><div><h3><CalendarDays size={17}/> Bảng chấm công theo ngày</h3><p>{snapshots.length} nhân sự trong danh sách chốt · {days.length} ngày · dữ liệu theo kỳ đang chọn.</p></div><div className="da-actions"><label className="da-code-map">Mã Có mặt<select value={presentCode} onChange={e => setPresentCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><label className="da-code-map">Mã nghỉ CN<select value={sundayCode} onChange={e => setSundayCode(e.target.value)} disabled={!canEdit}><option value="">Chọn mã</option>{codes.map(c => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}</select></label><button className="btn btn-primary" onClick={syncStandardAttendance} disabled={!canEdit || saving || !snapshots.length}><CalendarDays size={14}/> {syncProgress ? `Đang đồng bộ ${syncProgress.processed.toLocaleString('vi-VN')}/${syncProgress.total.toLocaleString('vi-VN')}` : 'Đồng bộ công chuẩn'}</button><button className="btn btn-secondary" onClick={downloadTemplate} disabled={!snapshots.length}><Download size={14}/> Template</button><label className={`btn btn-secondary da-upload ${!canEdit || importing ? 'disabled' : ''}`}><Upload size={14}/> {importing ? 'Đang nhập…' : 'Import'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!canEdit || importing || !snapshots.length} onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }}/></label><button className="btn btn-secondary" onClick={exportAttendance} disabled={!snapshots.length}><Download size={14}/> Export</button></div></div>
         <div className="da-filters"><label className="da-search"><Search size={15}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên…"/></label><select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="ALL">Tất cả nhóm công</option><option value="26">Nhóm 26 ngày</option><option value="28">Nhóm 28 ngày</option><option value="NONE">Nhóm không tính công</option><option value="UNKNOWN">Thiếu định mức</option></select><select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="ALL">Tất cả trạng thái</option><option value="ENTERED">Đã nhập chấm công</option><option value="MISSING">Chưa nhập chấm công</option><option value="Đủ công">Đủ công</option><option value="Thiếu công">Thiếu công</option><option value="Chưa đủ dữ liệu">Chưa đủ dữ liệu</option><option value="Không áp dụng">Không áp dụng</option><option value="Thiếu định mức">Thiếu định mức</option></select></div>
         {!snapshots.length ? <div className="da-snapshot-empty"><Users size={27}/><h3>Chưa có danh sách nhân sự chốt cho kỳ này</h3><p>Không tự lấy nhân sự hiện tại làm snapshot. Nếu đây là kỳ cũ chưa có snapshot, hãy đối chiếu danh sách trước khi chốt từ Employee Master hiện tại.</p><button className="btn btn-primary" onClick={createSnapshot} disabled={!canEdit || saving || !employees.length}><Users size={14}/> Chốt danh sách nhân sự cho kỳ</button><small>Thao tác cần xác nhận và không thể tự động đồng bộ lại theo Employee Master.</small></div> : <div className="da-table-wrap"><table className="da-table"><thead><tr><th className="da-sticky-col da-sticky-one">Mã NV</th><th className="da-sticky-col da-sticky-two">Họ và tên</th><th>Loại chuẩn</th><th>Chuẩn</th>{days.map((d) => <th key={dateKey(d)} className={`${[0,6].includes(d.getDay()) ? 'weekend' : ''} da-day-head`}><span>{d.toLocaleDateString('vi-VN', { weekday: 'short' })}</span><strong>{String(d.getDate()).padStart(2, '0')}</strong></th>)}<th>Công thực tế</th><th>Tỷ lệ</th><th>Đánh giá</th></tr></thead><tbody>{rows.map((row) => {
           const s = row.snapshot;
-          return <tr key={s.id}><td className="da-sticky-col da-sticky-one"><strong>{s.employee_code_snapshot}</strong></td><td className="da-sticky-col da-sticky-two"><strong>{s.employee_name_snapshot}</strong><small>{s.department_snapshot || ''}</small></td><td>{row.type === 'UNKNOWN' ? <span className="da-warning-text">Thiếu định mức</span> : (STANDARD_TYPES.find((x) => x.value === row.type)?.label || row.type)}</td><td>{formatNumber(row.standard, 1)}</td>{days.map((date) => { const record = recordMap.get(`${s.employee_id}|${dateKey(date)}`); return <td key={dateKey(date)} className={`${[0,6].includes(date.getDay()) ? 'weekend' : ''} da-cell`}>{row.type === 'NONE' ? <span className="da-not-applicable">—</span> : <select aria-label={`${s.employee_code_snapshot} ${dateKey(date)}`} value={record?.attendance_code || ''} disabled={!canEdit || !codes.length} onChange={(e) => saveAttendance(s, date, e.target.value)} title={record?.note || ''} style={record?.attendance_code ? { backgroundColor: codeMap.get(record.attendance_code)?.color || '#fff', borderColor: codeMap.get(record.attendance_code)?.color || 'transparent' } : undefined}><option value="">—</option>{codes.map((c) => <option key={c.id} value={c.code} style={{ backgroundColor: c.color || '#fff' }}>{c.code}</option>)}</select>}</td>})}<td><strong>{row.type === 'NONE' ? '—' : formatNumber(row.counted, 2)}</strong>{row.hasUnconfigured && <small className="da-warning-text">Có mã chưa quy đổi</small>}</td><td>{row.type === 'NONE' || !row.standard ? '—' : `${formatNumber(row.counted / row.standard * 100, 2)}%`}</td><td><span className={`da-result ${row.status === 'Đủ công' ? 'good' : row.status === 'Thiếu công' ? 'bad' : row.status === 'Không áp dụng' ? 'na' : 'pending'}`}>{row.status}</span></td></tr>;
+          return <tr key={s.id}><td className="da-sticky-col da-sticky-one"><strong>{s.employee_code_snapshot}</strong></td><td className="da-sticky-col da-sticky-two"><strong>{s.employee_name_snapshot}</strong><small>{s.department_snapshot || ''}</small></td><td>{row.type === 'UNKNOWN' ? <span className="da-warning-text">Thiếu định mức</span> : (STANDARD_TYPES.find((x) => x.value === row.type)?.label || row.type)}</td><td>{formatNumber(row.standard, 1)}</td>{days.map((date) => { const record = recordMap.get(`${s.employee_id}|${dateKey(date)}`); return <td key={dateKey(date)} className={`${[0,6].includes(date.getDay()) ? 'weekend' : ''} da-cell`}>{row.type === 'NONE' ? <span className="da-not-applicable">—</span> : <select aria-label={`${s.employee_code_snapshot} ${dateKey(date)}`} value={record?.attendance_code || ''} disabled={!canEdit || !codes.length} onChange={(e) => saveAttendance(s, date, e.target.value)} title={record?.note || ''} style={record?.attendance_code ? { color: codeMap.get(record.attendance_code)?.color || '#334155', fontWeight: codeMap.get(record.attendance_code)?.is_bold === false ? 500 : 750 } : undefined}><option value="">—</option>{codes.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}</select>}</td>})}<td><strong>{row.type === 'NONE' ? '—' : formatNumber(row.counted, 2)}</strong>{row.hasUnconfigured && <small className="da-warning-text">Có mã chưa quy đổi</small>}</td><td>{row.type === 'NONE' || !row.standard ? '—' : `${formatNumber(row.counted / row.standard * 100, 2)}%`}</td><td><span className={`da-result ${row.status === 'Đủ công' ? 'good' : row.status === 'Thiếu công' ? 'bad' : row.status === 'Không áp dụng' ? 'na' : 'pending'}`}>{row.status}</span></td></tr>;
         })}{!rows.length && <tr><td colSpan={days.length + 7} className="da-no-rows">Không có nhân sự phù hợp bộ lọc.</td></tr>}</tbody></table></div>}
         <div className="da-footer">Hiển thị {rows.length}/{snapshots.length} nhân sự · Ô trống là chưa nhập, không tự động được hiểu là vắng mặt. Công thực tế chỉ cộng hệ số đã cấu hình.</div>
       </section>

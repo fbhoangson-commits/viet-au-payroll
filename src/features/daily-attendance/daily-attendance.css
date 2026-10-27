@@ -5,3 +5,39 @@
 .da-code-map{display:grid;gap:4px;min-width:115px;font-size:9px;color:#63798b;font-weight:700}.da-code-map select{max-width:180px;border:1px solid #d9e3ec;border-radius:7px;background:#fff;padding:8px;color:#244158;font:inherit;font-size:10px}.da-actions{align-items:end}
 
 .da-code-form input[type=color],.da-color-picker{width:34px!important;height:30px;padding:2px!important;border:1px solid #d9e3ec;border-radius:6px;background:#fff;cursor:pointer}.da-code-item{transition:background-color .12s ease,border-color .12s ease}.da-cell select{transition:background-color .12s ease}
+
+/* Chấm Công Ngày — refined controls using the application's existing button vocabulary. */
+.daily-attendance-page .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:8px 12px;border:1px solid transparent;border-radius:7px;font:inherit;font-size:11px;font-weight:650;line-height:1.2;white-space:nowrap;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease;}
+.daily-attendance-page .btn-primary{background:#117c83;border-color:#117c83;color:#fff;box-shadow:0 1px 2px rgba(17,124,131,.12)}
+.daily-attendance-page .btn-primary:hover:not(:disabled){background:#0d6970;border-color:#0d6970}
+.daily-attendance-page .btn-secondary{background:#fff;border-color:#d7e1e9;color:#345269}
+.daily-attendance-page .btn-secondary:hover:not(:disabled){background:#f5f9fb;border-color:#b8cbd8}
+.daily-attendance-page .btn-ghost{background:transparent;border-color:transparent;color:#657b8e}
+.daily-attendance-page .btn-ghost:hover:not(:disabled){background:#f1f5f8;color:#344f64}
+.daily-attendance-page .btn-icon{width:32px;min-width:32px;padding:7px}
+.daily-attendance-page .btn:focus-visible,.daily-attendance-page input:focus-visible,.daily-attendance-page select:focus-visible{outline:2px solid rgba(17,124,131,.35);outline-offset:1px}
+.daily-attendance-page .btn:disabled{opacity:.48;cursor:not-allowed;box-shadow:none}
+.daily-attendance-page .da-toolbar,.daily-attendance-page .da-config-panel,.daily-attendance-page .da-codes-panel,.daily-attendance-page .da-table-panel{box-shadow:0 2px 8px rgba(23,53,75,.025)}
+.daily-attendance-page .da-code-form{grid-template-columns:90px minmax(150px,1.2fr) minmax(130px,.75fr) minmax(150px,.8fr) auto auto;gap:10px}
+.daily-attendance-page .da-color-input{display:flex;align-items:center;gap:7px;min-width:0}
+.daily-attendance-page .da-color-input input[type=color],.daily-attendance-page .da-code-style-control input[type=color]{width:32px;height:32px;min-width:32px;padding:3px;border:1px solid #d7e1e9;border-radius:7px;background:#fff;cursor:pointer}
+.daily-attendance-page .da-color-input input[type=text],.daily-attendance-page .da-code-style-control input[type=text]{min-width:0;width:90px;padding:8px;border:1px solid #d7e1e9;border-radius:7px;background:#fff;color:#435c70;font:inherit;font-size:10px;text-transform:uppercase}
+.daily-attendance-page .da-checkbox{padding:0 2px;min-height:34px}
+.daily-attendance-page .da-code-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:8px}
+.daily-attendance-page .da-code-item{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 10px;background:#fff;border:1px solid #e1e8ef;border-radius:9px}
+.daily-attendance-page .da-code-preview{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:34px;padding:0 7px;border:1px solid #e1e8ef;border-radius:7px;background:#f8fafc;font-size:13px;letter-spacing:.1px}
+.daily-attendance-page .da-code-label{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0;color:#334b5f;font-size:11px;font-weight:650}
+.daily-attendance-page .da-code-label small{color:#8291a0;font-size:9px;font-weight:450;white-space:normal}
+.daily-attendance-page .da-code-style-control{display:flex;align-items:center;gap:5px;min-width:0}
+.daily-attendance-page .da-code-style-control input[type=text]{width:76px}
+.daily-attendance-page .da-code-bold{display:flex;align-items:center;gap:4px;color:#667b8d;font-size:10px;white-space:nowrap}
+.daily-attendance-page .da-code-bold input,.daily-attendance-page .da-checkbox input{accent-color:#117c83}
+.daily-attendance-page .da-table .da-cell select{appearance:none;-webkit-appearance:none;width:44px;min-height:30px;padding:5px 1px;border:1px solid transparent;border-radius:5px;background-color:transparent!important;text-align:center;text-align-last:center;font-size:10px;cursor:pointer}
+.daily-attendance-page .da-table .da-cell select:hover:not(:disabled){border-color:#d7e1e9;background:#f8fafc!important}
+.daily-attendance-page .da-table .da-cell select:focus-visible{border-color:#117c83;background:#fff!important}
+.daily-attendance-page .da-notice button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;cursor:pointer}
+.daily-attendance-page .da-notice button:hover{background:rgba(40,70,90,.07)}
+.daily-attendance-page .da-upload{cursor:pointer}
+.daily-attendance-page .da-upload input{cursor:pointer}
+@media(max-width:1100px){.daily-attendance-page .da-code-form{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:650px){.daily-attendance-page .da-code-form{grid-template-columns:1fr}.daily-attendance-page .da-code-list{grid-template-columns:1fr}.daily-attendance-page .da-code-item{flex-wrap:wrap}.daily-attendance-page .da-code-label{min-width:100px}}
