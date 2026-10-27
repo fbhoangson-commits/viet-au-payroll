@@ -158,14 +158,16 @@ export default function PayrollCalculationPage({ page }) {
       const activePolicy=(policyVersions||[]).find(p=>p.id===(selectedPeriod.salary_version_id||selectedPeriod.salary_policy_version_id))||(policyVersions||[]).find(p=>String(p.status||'').toUpperCase()==='ACTIVE')||(policyVersions||[])[0];
       const columnsById=new Map(columns.map(c=>[clean(c.id),c]));
       const valuesByEmployee=new Map();
-      for(const r of rateValues.filter(v=>!activePolicy?.id || v.policy_version_id===activePolicy.id)) {
+      // Prefer the period's policy, but retain a fallback to the employee's saved rate rows when the policy link is absent/mismatched.
+      const policyRateValues=rateValues.filter(v=>!activePolicy?.id || v.policy_version_id===activePolicy.id);
+      for(const r of policyRateValues) {
         const key=employeeId(r); if(!valuesByEmployee.has(key)) valuesByEmployee.set(key,[]);
         valuesByEmployee.get(key).push(r);
       }
       const selectedRateColumns=columns.filter(c=>c.is_active!==false);
       const rateGroupName = c => norm(groupsById.get(clean(c.group_id))?.name || groupsById.get(clean(c.group_id))?.code || '');
       const isFixedGroup = c => { const n=rateGroupName(c); return n.includes('fixed') || n.includes('co dinh'); };
-      const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n === 'khac' || n.includes('teaching') || n.includes('tutoring'); };
+      const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('teaching') || n.includes('tutoring'); };
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
       const teachingColumns = selectedRateColumns.filter(isTeachingColumn);
       const dynamicLabels = Object.fromEntries([...fixedColumns.map(c=>[`fixedCol_${c.id}`,clean(c.name||c.label||c.code||'Cấu phần lương')]),...teachingColumns.map(c=>[`lesson_${c.id}`,clean(c.name||c.label||c.code||'Cột tiết')])]);
@@ -215,13 +217,13 @@ export default function PayrollCalculationPage({ page }) {
         for(const rv of rateRows){
           const group=groupsById.get(clean(rv.group_id));
           const groupName=norm(group?.name||group?.code||'');
-          if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName==='khac'||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
+          if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName.includes('khac')||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
           const vals=rv.values && typeof rv.values==='object' ? rv.values : {};
           for(const c of fixedColumns.filter(c=>clean(c.group_id)===clean(rv.group_id))){
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>employeeId(r)===id);
+        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
@@ -229,8 +231,10 @@ export default function PayrollCalculationPage({ page }) {
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
-          const rv=rateRows.find(v=>clean(v.group_id)===clean(col.group_id));
-          const rate=rv?.values?.[col.id];
+          const recordRateRows=valuesByEmployee.get(employeeId(rec))||[];
+          const allEmployeeRateRows=rateValues.filter(v=>employeeId(v)===employeeId(rec));
+          const rv=recordRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||allEmployeeRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||rateRows.find(v=>clean(v.group_id)===clean(col.group_id));
+          const rate=rv?.values?.[col.id]??rv?.values?.[col.code]??rv?.values?.[col.name];
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
