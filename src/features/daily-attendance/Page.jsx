@@ -43,6 +43,19 @@ function downloadWorkbook(filename, rows, sheetName = 'Chấm công') {
   XLSX.writeFile(wb, filename);
 }
 
+// Supabase/PostgREST commonly caps one response at 1,000 rows.
+// Fetch every page so counters and sync logic use the complete period.
+async function fetchAllRows(queryFactory, pageSize = 500) {
+  const all = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await queryFactory().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = data || [];
+    all.push(...page);
+    if (page.length < pageSize) return all;
+  }
+}
+
 export default function Page() {
   const [periods, setPeriods] = useState([]);
   const [periodId, setPeriodId] = useState('');
@@ -101,12 +114,12 @@ export default function Page() {
       supabase.from(SNAPSHOTS).select('*').eq('period_id', id).order('employee_code_snapshot'),
       supabase.from(SETTINGS).select('*').eq('period_id', id).maybeSingle(),
       supabase.from(CODES).select('*').eq('is_active', true).order('display_order').order('code'),
-      supabase.from(RECORDS).select('*').eq('period_id', id).order('work_date'),
+      fetchAllRows(() => supabase.from(RECORDS).select('*').eq('period_id', id).order('work_date').order('employee_id')),
       supabase.from('salary_workday_norms').select('employee_id,policy_version_id,workday_count').eq('policy_version_id', periods.find(p => p.id === id)?.salary_version_id || '00000000-0000-0000-0000-000000000000'),
     ]);
     const [s, c, k, r, n] = results;
     for (const result of results) if (result.error) throw result.error;
-    setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []); setWorkdayNorms(n.data || []);
+    setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(Array.isArray(r) ? r : (r.data || [])); setWorkdayNorms(n.data || []);
     setStandard26Days(String(c.data?.standard_26_days ?? 26));
     setStandard28Days(String(c.data?.standard_28_days ?? 28));
     setConfigNote(c.data?.notes || '');
@@ -158,13 +171,13 @@ export default function Page() {
           supabase.from(SNAPSHOTS).select('*').eq('period_id', periodId).order('employee_code_snapshot'),
           supabase.from(SETTINGS).select('*').eq('period_id', periodId).maybeSingle(),
           supabase.from(CODES).select('*').eq('is_active', true).order('display_order').order('code'),
-          supabase.from(RECORDS).select('*').eq('period_id', periodId).order('work_date'),
+          fetchAllRows(() => supabase.from(RECORDS).select('*').eq('period_id', periodId).order('work_date').order('employee_id')),
           fetchEmployees(),
           supabase.from('salary_workday_norms').select('employee_id,policy_version_id,workday_count').eq('policy_version_id', periods.find(p => p.id === periodId)?.salary_version_id || '00000000-0000-0000-0000-000000000000'),
         ]);
         for (const result of [s, c, k, r, normResult]) if (result.error) throw result.error;
         if (!alive) return;
-        setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(r.data || []); setEmployees(employeeRows || []); setWorkdayNorms(normResult.data || []);
+        setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(Array.isArray(r) ? r : (r.data || [])); setEmployees(employeeRows || []); setWorkdayNorms(normResult.data || []);
         setStandard26Days(String(c.data?.standard_26_days ?? 26)); setStandard28Days(String(c.data?.standard_28_days ?? 28));
         setConfigNote(c.data?.notes || '');
         setPresentCode(old => old || (k.data || []).find(x => /đi làm|có mặt|present/i.test(`${x.code} ${x.label}`))?.code || '');
@@ -488,14 +501,14 @@ export default function Page() {
           <label><span>Mã công</span><input value={newCode} onChange={(e) => setNewCode(e.target.value)} maxLength={12} placeholder="VD: X, P, K" required disabled={!canEdit}/></label>
           <label><span>Tên mã công</span><input value={newCodeLabel} onChange={(e) => setNewCodeLabel(e.target.value)} placeholder="VD: Đi làm" required disabled={!canEdit}/></label>
           <label><span>Hệ số công</span><input type="number" min="0" max="1" step="0.5" value={newCodeUnits} onChange={(e) => setNewCodeUnits(e.target.value)} placeholder="Để trống nếu chưa chốt" disabled={!canEdit}/></label>
-          <label><span>Màu chữ</span><div className="da-color-input"><input type="color" value={newCodeColor} onChange={(e) => setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Màu chữ mã công"/><input type="text" value={newCodeColor.toUpperCase()} maxLength={7} pattern="^#[0-9A-Fa-f]{6}$" onChange={(e) => /^#[0-9A-Fa-f]{6}$/.test(e.target.value) && setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Mã màu HEX"/></div></label><label className="da-checkbox"><input type="checkbox" checked={newCodeBold} onChange={(e) => setNewCodeBold(e.target.checked)} disabled={!canEdit}/> Chữ đậm</label>
+          <label><span>Màu chữ</span><div className="da-color-input da-color-input-compact"><input type="color" value={newCodeColor} onChange={(e) => setNewCodeColor(e.target.value)} disabled={!canEdit} aria-label="Chọn màu chữ mã công"/></div></label><label className="da-checkbox"><input type="checkbox" checked={newCodeBold} onChange={(e) => setNewCodeBold(e.target.checked)} disabled={!canEdit}/> Chữ đậm</label>
           <label className="da-checkbox"><input type="checkbox" checked={newCodeNote} onChange={(e) => setNewCodeNote(e.target.checked)} disabled={!canEdit}/> Yêu cầu ghi chú</label>
           <button className="btn btn-primary" disabled={!canEdit}><Plus size={14}/> Thêm mã</button>
         </form>
         <div className="da-code-list">{codes.map((c) => <div key={c.id} className="da-code-item">
           <span className="da-code-preview" style={{ color: c.color || '#475569', fontWeight: c.is_bold === false ? 500 : 750 }}>{c.code}</span>
           <span className="da-code-label">{c.label}<small>{c.work_units == null ? 'Chưa cấu hình quy đổi' : `${formatNumber(c.work_units)} công`}{c.requires_note ? ' · Cần ghi chú' : ''}</small></span>
-          {canEdit && <label className="da-code-style-control" title={`Màu chữ mã ${c.code}`}><input type="color" value={/^#[0-9A-Fa-f]{6}$/.test(c.color || '') ? c.color : '#475569'} aria-label={`Màu chữ mã ${c.code}`} onChange={(e) => updateCodeStyle(c, { color: e.target.value })}/><input type="text" defaultValue={(c.color || '#475569').toUpperCase()} maxLength={7} aria-label={`HEX mã ${c.code}`} onBlur={(e) => { const value = e.target.value.trim(); if (/^#[0-9A-Fa-f]{6}$/.test(value) && value.toLowerCase() !== (c.color || '#475569').toLowerCase()) updateCodeStyle(c, { color: value }); else e.target.value = (c.color || '#475569').toUpperCase(); }}/></label>}
+          {canEdit && <label className="da-code-style-control" title={`Chọn màu chữ mã ${c.code}`}><input type="color" value={/^#[0-9A-Fa-f]{6}$/.test(c.color || '') ? c.color : '#475569'} aria-label={`Màu chữ mã ${c.code}`} onChange={(e) => updateCodeStyle(c, { color: e.target.value })}/></label>}
           {canEdit && <label className="da-code-bold"><input type="checkbox" checked={c.is_bold !== false} onChange={(e) => updateCodeStyle(c, { is_bold: e.target.checked })}/> Đậm</label>}
           {canEdit && <button type="button" className="btn btn-ghost btn-icon" title="Ngừng sử dụng mã" onClick={() => deactivateCode(c)}><Trash2 size={14}/></button>}
         </div>)}{!codes.length && <p className="da-muted">Chưa có mã công. Hãy thêm mã và chỉ nhập hệ số sau khi đã thống nhất quy tắc quy đổi.</p>}</div>

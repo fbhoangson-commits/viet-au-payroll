@@ -41,3 +41,15 @@
 .daily-attendance-page .da-upload input{cursor:pointer}
 @media(max-width:1100px){.daily-attendance-page .da-code-form{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:650px){.daily-attendance-page .da-code-form{grid-template-columns:1fr}.daily-attendance-page .da-code-list{grid-template-columns:1fr}.daily-attendance-page .da-code-item{flex-wrap:wrap}.daily-attendance-page .da-code-label{min-width:100px}}
+
+/* V5: compact code legend without displaying HEX strings; paged record loading supports full-period sync. */
+.daily-attendance-page .da-code-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:8px}
+.daily-attendance-page .da-code-item{display:grid;grid-template-columns:42px minmax(70px,1fr) 34px auto 28px;align-items:center;gap:8px;min-height:54px}
+.daily-attendance-page .da-code-label{font-size:11px;line-height:1.25;overflow-wrap:anywhere}
+.daily-attendance-page .da-code-label small{font-size:9px;line-height:1.35;white-space:normal}
+.daily-attendance-page .da-code-style-control{display:flex;align-items:center;justify-content:center}
+.daily-attendance-page .da-code-style-control input[type=color],.daily-attendance-page .da-color-input-compact input[type=color]{width:28px;height:28px;min-width:28px;padding:2px;border:1px solid #d7e1e9;border-radius:7px;background:#fff;cursor:pointer}
+.daily-attendance-page .da-color-input-compact{min-height:36px}
+.daily-attendance-page .da-code-bold{font-size:9px;gap:3px}
+@media(max-width:900px){.daily-attendance-page .da-code-item{grid-template-columns:38px minmax(60px,1fr) 30px auto 24px;gap:6px}}
+@media(max-width:650px){.daily-attendance-page .da-code-item{grid-template-columns:42px minmax(80px,1fr) 32px auto 26px}}
