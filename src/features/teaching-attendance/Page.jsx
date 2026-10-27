@@ -29,7 +29,7 @@ const rateValueFor = (values, col) => {
   const source = values && typeof values === 'object' ? values : {};
   const keys = [col?.id, col?.code, col?.name, col?.label].filter(v => v !== undefined && v !== null && clean(v) !== '');
   for (const key of keys) if (Object.prototype.hasOwnProperty.call(source, key) && source[key] !== '' && source[key] != null) return source[key];
-  const normalized = value => norm(value);
+  const normalized = value => norm(value).replace(/[^a-z0-9]+/g, '');
   const wanted = new Set(keys.map(normalized));
   const match = Object.keys(source).find(key => wanted.has(normalized(key)));
   return match === undefined ? undefined : source[match];
@@ -412,11 +412,12 @@ export default function Page() {
                 const rateValuesForCol = visibleEmployees.reduce((sum, e) => sum + (recordMap.get(`${e.employee_id}|${col.id}`) || 0), 0);
                 const allRates = visibleEmployees.every(e => {
                   const r = rateMap.get(`${e.employee_id}|${currentGroup?.source?.id}`) || {};
-                  return r[col.id] != null && r[col.id] !== '' && Number.isFinite(Number(r[col.id]));
+                  const raw = rateValueFor(r, col);
+                  return raw != null && raw !== '' && Number.isFinite(Number(raw));
                 });
                 const amount = visibleEmployees.reduce((sum,e) => {
                   const r = rateMap.get(`${e.employee_id}|${currentGroup?.source?.id}`) || {};
-                  return sum + (recordMap.get(`${e.employee_id}|${col.id}`)||0) * (Number(r[col.id])||0);
+                  return sum + (recordMap.get(`${e.employee_id}|${col.id}`)||0) * (Number(rateValueFor(r, col))||0);
                 },0);
                 return <React.Fragment key={col.id}><th>{fmt(rateValuesForCol)}</th><th>{allRates ? money(amount) : 'Thiếu đơn giá'}</th></React.Fragment>;
               })}<th>{groupTotals.missingRates ? 'Thiếu đơn giá' : money(groupTotals.total)}</th><th>—</th></tr></tfoot>

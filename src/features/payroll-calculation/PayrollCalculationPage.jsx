@@ -16,6 +16,7 @@ const num = value => {
 };
 const clean = v => String(v ?? '').trim();
 const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
+const rateKey = v => norm(v).replace(/[^a-z0-9]/g, '');
 const codeOf = e => clean(e?.employee_code || e?.employee_code_snapshot || e?.code || '');
 const nameOf = e => clean(e?.employee_name_snapshot || e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
 const periodTitle = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?.period_year || ''}-${String(p?.period_month || '').padStart(2,'0')}`);
@@ -255,8 +256,8 @@ export default function PayrollCalculationPage({ page }) {
             const values=candidate?.values && typeof candidate.values==='object' ? candidate.values : {};
             for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
             if(rate===undefined){
-              const wanted=new Set(rateKeys.map(norm));
-              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
+              const wanted=new Set(rateKeys.map(rateKey));
+              const matchedKey=Object.keys(values).find(key=>wanted.has(rateKey(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
               if(matchedKey!==undefined) rate=values[matchedKey];
             }
             if(rate!==undefined) break;
