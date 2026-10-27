@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../shared/supabase.js';
 import { ShieldCheck, RefreshCw, Search, Pencil, Save, X, Settings2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import './insurance-tax-data.css';
+import './styles/insurance-tax-data.css';
 
 const PERIODS='payroll_periods', SNAPSHOTS='payroll_period_employees', PERIOD_DATA='payroll_period_insurance_tax_data';
 const INSURANCE='employee_insurance_profiles', DEPENDENTS='employee_tax_dependents', COMMITMENTS='employee_income_commitments', SUPPORT='employee_support_allowances', TAX_CONFIG='payroll_tax_relief_config';
