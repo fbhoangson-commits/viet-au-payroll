@@ -1,10 +1,9 @@
 # Khoản Bổ Sung
 
-Thư mục độc lập cho tính năng `payroll-adjustments`.
+Route: `/payroll-adjustments`.
 
-- `Page.jsx`: màn hình chính của tính năng.
-- `components/`: các thành phần chỉ dùng trong tính năng này.
-- `services/`: truy vấn và xử lý dữ liệu riêng.
-- `styles/`: CSS riêng của tính năng.
+Gồm hai nghiệp vụ: Khoản Cộng Trừ theo kỳ lương và hồ sơ Tạm Ứng/kế hoạch thu hồi.
 
-Hiện tại đây là khung trắng, chưa kết nối dữ liệu và chưa thực hiện import.
+Migration bổ sung: `supabase/migrations/20261027_payroll_adjustments_and_advances.sql`.
+
+Lưu ý: kế hoạch thu hồi hiện được lưu riêng, chưa tự động khấu trừ vào module TÍNH LƯƠNG. Cần tích hợp và kiểm thử cùng module tính lương sau khi xác minh schema và quy tắc hiện hành.
