@@ -16,7 +16,6 @@ const num = value => {
 };
 const clean = v => String(v ?? '').trim();
 const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
-const rateKey = v => norm(v).replace(/[^a-z0-9]/g, '');
 const codeOf = e => clean(e?.employee_code || e?.employee_code_snapshot || e?.code || '');
 const nameOf = e => clean(e?.employee_name_snapshot || e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
 const periodTitle = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?.period_year || ''}-${String(p?.period_month || '').padStart(2,'0')}`);
@@ -224,11 +223,19 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
+        const lessons=periodTeaching.filter(r=>
+          (employeeId(r) && employeeId(r)===id) ||
+          (code && [r.employee_code, r.employee_code_snapshot, r.code].some(v => clean(v).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi')))
+        );
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
-          const col=columnsById.get(clean(rec.salary_rate_column_id));
+          // Resolve the saved column reference defensively. Some historical attendance
+          // rows may retain a column code/name rather than the current UUID.
+          const rawColumnRef = clean(rec.salary_rate_column_id || rec.salary_rate_column_code || rec.salary_rate_column_name || rec.column_code || rec.column_name);
+          const col = columnsById.get(rawColumnRef) || columns.find(c =>
+            [c.id, c.code, c.name, c.label].some(v => clean(v) && norm(v) === norm(rawColumnRef))
+          );
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
@@ -256,8 +263,8 @@ export default function PayrollCalculationPage({ page }) {
             const values=candidate?.values && typeof candidate.values==='object' ? candidate.values : {};
             for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
             if(rate===undefined){
-              const wanted=new Set(rateKeys.map(rateKey));
-              const matchedKey=Object.keys(values).find(key=>wanted.has(rateKey(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
+              const wanted=new Set(rateKeys.map(norm));
+              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
               if(matchedKey!==undefined) rate=values[matchedKey];
             }
             if(rate!==undefined) break;
