@@ -248,23 +248,32 @@ export default function PayrollCalculationPage({ page }) {
             (recordEmployeeId && employeeId(v)===recordEmployeeId) ||
             (recordEmployeeCode && codeOf(v).toLocaleUpperCase('vi')===recordEmployeeCode)
           );
-          // Resolve the rate per COLUMN, not by choosing one row for the whole group.
-          // A group can have multiple saved rows across policy versions; each row may
-          // contain only some of the group's column values. Prefer the period policy,
-          // then fall back per column without letting an incomplete row hide other rates.
+          // Resolve each attendance row against the exact employee + OTHER/teaching group + column.
+          // JSONB salary_rate_values stores dynamic column UUIDs as object keys. Resolve that
+          // canonical key first; then support legacy code/name keys. Keep a saved zero as a
+          // valid rate (e.g. an employee may intentionally have no IELTS rate).
+          const sameEmployeeRateRows=rateValues.filter(v =>
+            employeeId(v)===recordEmployeeId && clean(v.group_id)===clean(col.group_id)
+          );
           const preferredRows=[
-            ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
-            ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
-            ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
-          ].filter(v=>clean(v.group_id)===clean(col.group_id));
-          const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
+            ...sameEmployeeRateRows.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
+            ...sameEmployeeRateRows.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
+          ];
+          const rateKeys=[clean(col.id),clean(col.code),clean(col.name),clean(col.label)].filter(Boolean);
           let rate;
           for(const candidate of preferredRows){
-            const values=candidate?.values && typeof candidate.values==='object' ? candidate.values : {};
-            for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
+            const values=candidate?.values && typeof candidate.values==='object' && !Array.isArray(candidate.values) ? candidate.values : {};
+            // Canonical UUID key is authoritative for dynamic columns.
+            if(Object.prototype.hasOwnProperty.call(values,clean(col.id)) && values[clean(col.id)]!==null && values[clean(col.id)]!=='') {
+              rate=values[clean(col.id)];
+              break;
+            }
+            for(const key of rateKeys.slice(1)){
+              if(Object.prototype.hasOwnProperty.call(values,key) && values[key]!==null && values[key]!=='') { rate=values[key]; break; }
+            }
             if(rate===undefined){
               const wanted=new Set(rateKeys.map(norm));
-              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
+              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==null&&values[key]!==undefined&&values[key]!=='');
               if(matchedKey!==undefined) rate=values[matchedKey];
             }
             if(rate!==undefined) break;
