@@ -20,6 +20,33 @@ const employeeName = e => e.full_name || e.name || '';
 const employeeDept = e => e.department || e.department_name || e.division || '';
 const employeePosition = e => e.position || e.job_title || e.title || '';
 const norm = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').trim().toLocaleLowerCase('vi');
+// Employee Master is the source of truth for these two fields. Master columns may be
+// physical columns or dynamic custom_fields imported from Excel with Vietnamese headers.
+const masterField = (employee, candidates) => {
+  if (!employee) return { found: false, value: null };
+  const all = { ...employee, ...(employee.custom_fields && typeof employee.custom_fields === 'object' ? employee.custom_fields : {}) };
+  const wanted = new Set(candidates.map(norm));
+  for (const [key, value] of Object.entries(all)) {
+    if (wanted.has(norm(key)) && value !== undefined && value !== null && String(value).trim() !== '') return { found: true, value };
+  }
+  return { found: false, value: null };
+};
+const masterBoolean = value => {
+  if (typeof value === 'boolean') return value;
+  const s = norm(value);
+  if (['co','yes','true','1','tham gia','dang tham gia','x'].includes(s)) return true;
+  if (['khong','no','false','0','khong tham gia','khong'].includes(s)) return false;
+  return null;
+};
+const masterDependentCount = employee => {
+  const field = masterField(employee, ['dependents_count','dependent_count','Người phụ thuộc','Số người phụ thuộc','Nguoi phu thuoc','So nguoi phu thuoc']);
+  if (!field.found) return null;
+  const value = Number(String(field.value).replace(/,/g, '.').trim());
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+};
+const masterInsuranceStatus = employee => {
+  const field = masterField(employee, ['social_insurance','Tham gia BHXH','BHXH','Có tham gia BHXH']);
+  return field.found ? masterBoolean(field.value) : null;
 const parseNumber = v => {
   if (typeof v === 'number') return v;
   let s = String(v ?? '').trim().replace(/[₫đ\s]/gi, '');
@@ -107,8 +134,10 @@ export default function Page() {
       const hay = norm([employeeCode(e),employeeName(e),employeeDept(e),employeePosition(e),e.employee_group,e.employment_type].join(' '));
       if (needle && !hay.includes(needle)) return false;
       if (tab === 'insurance' && filter !== 'all') {
-        if (filter === 'yes' && r.participates_insurance !== true) return false;
-        if (filter === 'no' && r.participates_insurance !== false) return false;
+        const masterStatus = masterInsuranceStatus(e);
+        const status = masterStatus !== null ? masterStatus : r.participates_insurance;
+        if (filter === 'yes' && status !== true) return false;
+        if (filter === 'no' && status !== false) return false;
       }
       if (tab === 'commitment' && filter !== 'all') {
         if (filter === 'yes' && r.has_commitment !== true) return false;
@@ -119,11 +148,23 @@ export default function Page() {
         if (filter === 'no' && r.is_union_member !== false) return false;
       }
       return true;
-    }).map(e => ({employee:e, record:byId.get(e.id) || null, dependentList: dependents.filter(d=>d.employee_id===e.id)}));
+    }).map(e => {
+      const stored = byId.get(e.id) || null;
+      const masterInsurance = masterInsuranceStatus(e);
+      const masterCount = masterDependentCount(e);
+      // Master values take precedence when configured; profile data remains a fallback
+      // for employees whose Master has not yet supplied that field.
+      const record = tab === 'insurance' && masterInsurance !== null
+        ? { ...(stored || {}), participates_insurance: masterInsurance, _participates_insurance_from_master: true }
+        : tab === 'relief' && masterCount !== null
+          ? { ...(stored || {}), dependent_count: masterCount, _dependent_count_from_master: true }
+          : stored;
+      return { employee:e, record, dependentList: dependents.filter(d=>d.employee_id===e.id), masterDependentCount:masterCount, masterInsuranceStatus:masterInsurance };
+    });
   }, [employees,insurance,dependents,commitments,unions,tab,search,filter]);
   const fields = fieldsByTab[tab] || [];
   const startEdit = item => {
-    const defaults = tab === 'insurance' ? { participates_insurance:null } : tab === 'commitment' ? {has_commitment:false} : tab === 'union' ? {is_union_member:false} : {dependent_count:item.dependentList.length};
+    const defaults = tab === 'insurance' ? { participates_insurance:item.masterInsuranceStatus ?? null } : tab === 'commitment' ? {has_commitment:false} : tab === 'union' ? {is_union_member:false} : {dependent_count:item.masterDependentCount ?? item.dependentList.length};
     setEditing({ employee:item.employee, record:{...defaults,...(item.record||{}), employee_id:item.employee.id} });
   };
   const saveEdit = async () => {
@@ -275,8 +316,8 @@ export default function Page() {
         <th>Thao tác</th></tr></thead><tbody>
         {loading?<tr><td colSpan="10" className="id-empty">Đang tải dữ liệu từ Supabase…</td></tr>:rows.map(item=>{const e=item.employee,r=item.record||{}, count=Number(r.dependent_count??item.dependentList.length)||0;return <tr key={e.id}>
           <td className="id-code">{employeeCode(e)||'—'}</td><td><strong>{employeeName(e)||'—'}</strong><small>{e.employee_group||e.employment_type||''}</small></td><td>{employeeDept(e)||'—'}<small>{employeePosition(e)||''}</small></td>
-          {tab==='insurance'&&<><td><span className={`id-pill ${r.participates_insurance===true?'yes':r.participates_insurance===false?'no':''}`}>{yesNo(r.participates_insurance)}</span></td><td>{money(r.insurance_salary_base)}</td><td>{r.employee_social_rate==null&&r.employee_health_rate==null&&r.employee_unemployment_rate==null?'Chưa cấu hình':[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].map(x=>x==null?'—':`${x}%`).join(' / ')}</td><td>{[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].every(x=>x==null)||r.insurance_salary_base==null?'Chưa cấu hình':money(Number(r.insurance_salary_base)*[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].reduce((sum,x)=>sum+(Number(x)||0),0)/100)+' ₫'}</td><td>{r.employer_social_rate==null&&r.employer_health_rate==null&&r.employer_unemployment_rate==null?'Chưa cấu hình':[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].map(x=>x==null?'—':`${x}%`).join(' / ')}</td><td>{[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].every(x=>x==null)||r.insurance_salary_base==null?'Chưa cấu hình':money(Number(r.insurance_salary_base)*[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].reduce((sum,x)=>sum+(Number(x)||0),0)/100)+' ₫'}</td></>}
-          {tab==='relief'&&<><td>{count} <button className="id-link" onClick={()=>openDependents(item)}>{item.dependentList.length?'Quản lý hồ sơ':'Thêm hồ sơ'}</button></td><td>{money(taxConfig.personal_relief_amount)} ₫</td><td>{money(count*Number(taxConfig.dependent_relief_amount||0))} ₫</td><td className="id-total">{money(Number(taxConfig.personal_relief_amount||0)+count*Number(taxConfig.dependent_relief_amount||0))} ₫</td></>}
+          {tab==='insurance'&&<><td><span className={`id-pill ${r.participates_insurance===true?'yes':r.participates_insurance===false?'no':''}`} title={r._participates_insurance_from_master?'Tự liên kết từ Nhân Sự Master':''}>{yesNo(r.participates_insurance)}{r._participates_insurance_from_master?' · Master':''}</span></td><td>{money(r.insurance_salary_base)}</td><td>{r.employee_social_rate==null&&r.employee_health_rate==null&&r.employee_unemployment_rate==null?'Chưa cấu hình':[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].map(x=>x==null?'—':`${x}%`).join(' / ')}</td><td>{[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].every(x=>x==null)||r.insurance_salary_base==null?'Chưa cấu hình':money(Number(r.insurance_salary_base)*[r.employee_social_rate,r.employee_health_rate,r.employee_unemployment_rate].reduce((sum,x)=>sum+(Number(x)||0),0)/100)+' ₫'}</td><td>{r.employer_social_rate==null&&r.employer_health_rate==null&&r.employer_unemployment_rate==null?'Chưa cấu hình':[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].map(x=>x==null?'—':`${x}%`).join(' / ')}</td><td>{[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].every(x=>x==null)||r.insurance_salary_base==null?'Chưa cấu hình':money(Number(r.insurance_salary_base)*[r.employer_social_rate,r.employer_health_rate,r.employer_unemployment_rate].reduce((sum,x)=>sum+(Number(x)||0),0)/100)+' ₫'}</td></>}
+          {tab==='relief'&&<><td>{count} {item.masterDependentCount !== null ? <span className="id-pill" title="Tự liên kết từ Nhân Sự Master">Từ Master</span> : null} <button className="id-link" onClick={()=>openDependents(item)}>{item.dependentList.length?'Quản lý hồ sơ':'Thêm hồ sơ'}</button></td><td>{money(taxConfig.personal_relief_amount)} ₫</td><td>{money(count*Number(taxConfig.dependent_relief_amount||0))} ₫</td><td className="id-total">{money(Number(taxConfig.personal_relief_amount||0)+count*Number(taxConfig.dependent_relief_amount||0))} ₫</td></>}
           {tab==='commitment'&&<><td>{yesNo(r.has_commitment)}</td><td>{r.effective_from||'—'}</td><td>{r.effective_to||'—'}</td><td>{r.document_reference||r.notes||'—'}</td></>}
           {tab==='union'&&<><td>{yesNo(r.is_union_member)}</td><td>{money(r.contribution_base)}</td><td>{money(r.employee_contribution)}</td><td>{money(r.employer_contribution)}</td><td>{r.effective_from||'—'}</td></>}
           <td className="id-actions">{tab!=='relief'&&<button className="id-icon-btn" onClick={()=>startEdit(item)} title="Sửa"><Pencil size={15}/></button>}{tab==='insurance'&&<button className="id-icon-btn" onClick={()=>setDependentsModal({insuranceDetails:true,employee:e})} title="Xem cấu phần tỷ lệ"><Eye size={15}/></button>}</td>
