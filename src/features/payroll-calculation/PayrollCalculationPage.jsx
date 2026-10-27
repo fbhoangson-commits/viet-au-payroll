@@ -240,24 +240,26 @@ export default function PayrollCalculationPage({ page }) {
             (recordEmployeeId && employeeId(v)===recordEmployeeId) ||
             (recordEmployeeCode && codeOf(v).toLocaleUpperCase('vi')===recordEmployeeCode)
           );
+          // Resolve the rate per COLUMN, not by choosing one row for the whole group.
+          // A group can have multiple saved rows across policy versions; each row may
+          // contain only some of the group's column values. Prefer the period policy,
+          // then fall back per column without letting an incomplete row hide other rates.
           const preferredRows=[
             ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
             ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
             ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
-          ];
-          let rate;
+          ].filter(v=>clean(v.group_id)===clean(col.group_id));
           const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
-          for (const candidate of preferredRows.filter(v=>clean(v.group_id)===clean(col.group_id))) {
+          let rate;
+          for(const candidate of preferredRows){
             const values=candidate?.values && typeof candidate.values==='object' ? candidate.values : {};
-            for (const key of rateKeys) {
-              if (Object.prototype.hasOwnProperty.call(values,key) && values[key]!==undefined && values[key]!==null && values[key]!=='') { rate=values[key]; break; }
-            }
-            if (rate===undefined) {
+            for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
+            if(rate===undefined){
               const wanted=new Set(rateKeys.map(norm));
-              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key)) && values[key]!==undefined && values[key]!==null && values[key]!=='');
-              if (matchedKey!==undefined) rate=values[matchedKey];
+              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
+              if(matchedKey!==undefined) rate=values[matchedKey];
             }
-            if (rate!==undefined) break;
+            if(rate!==undefined) break;
           }
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);

@@ -109,16 +109,16 @@ export default function Page() {
   const currentColumns = useMemo(() => currentGroup ? columns.filter(c => c.group_id === currentGroup.source.id && c.is_active !== false).sort((a,b) => Number(a.display_order||0)-Number(b.display_order||0) || String(a.name).localeCompare(String(b.name), 'vi')) : [], [columns, currentGroup]);
   const rateMap = useMemo(() => {
     const map = new Map();
-    // Prefer the selected policy, but fall back to the employee/group's saved rates
-    // when the period has no policy link or the saved row uses another policy ID.
-    // Merge columns across duplicate policy rows. A later row must not erase
-    // the other columns for the same employee/group; selected policy wins per key.
-    for (const row of rateValues) {
+    // Merge column values across policy rows. Choosing a whole row can hide the
+    // other columns when a row contains only a partial values object.
+    const ordered = [...rateValues].sort((a,b) => Number(String(b.policy_version_id||'')===String(policyId||'')) - Number(String(a.policy_version_id||'')===String(policyId||'')));
+    for (const row of ordered) {
       const key = `${row.employee_id}|${row.group_id}`;
-      const existing = map.get(key) || {};
+      const merged = { ...(map.get(key) || {}) };
       const incoming = row.values && typeof row.values === 'object' ? row.values : {};
-      const merged = { ...incoming, ...existing };
-      if (row.policy_version_id === policyId) Object.assign(merged, incoming);
+      for (const [columnKey, value] of Object.entries(incoming)) {
+        if (value !== undefined && value !== null && value !== '' && (merged[columnKey] === undefined || merged[columnKey] === null || merged[columnKey] === '' || String(row.policy_version_id||'')===String(policyId||''))) merged[columnKey] = value;
+      }
       map.set(key, merged);
     }
     return map;
