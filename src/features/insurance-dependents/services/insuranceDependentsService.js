@@ -73,3 +73,38 @@ export async function saveTaxReliefConfig(row) {
   if (error) throw error;
   return data;
 }
+
+
+export const SUPPORT_TABLE = 'employee_support_allowances';
+export const SUPPORT_CONFIG_TABLE = 'payroll_support_allowance_columns';
+
+export async function fetchSupportColumns() {
+  if (!supabase) throw new Error('Chưa cấu hình kết nối Supabase.');
+  const { data, error } = await supabase.from(SUPPORT_CONFIG_TABLE).select('*').eq('config_key', 'default').maybeSingle();
+  if (error) throw error;
+  if (Array.isArray(data?.columns) && data.columns.length) return data.columns;
+  return [
+    { key: 'lunch', label: 'Ăn trưa', active: true, sort_order: 1 },
+    { key: 'phone', label: 'Điện thoại', active: true, sort_order: 2 },
+    { key: 'uniform', label: 'Đồng phục', active: true, sort_order: 3 },
+  ];
+}
+export async function saveSupportColumns(columns) {
+  if (!supabase) throw new Error('Chưa cấu hình kết nối Supabase.');
+  const payload = { config_key: 'default', columns, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from(SUPPORT_CONFIG_TABLE).upsert(payload, { onConflict: 'config_key' }).select('*').single();
+  if (error) throw error;
+  return data.columns || columns;
+}
+export async function fetchSupportRows() {
+  return fetchModuleRows(SUPPORT_TABLE);
+}
+export async function saveSupportRow(employeeId, amounts) {
+  if (!supabase) throw new Error('Chưa cấu hình kết nối Supabase.');
+  const { data, error } = await supabase.from(SUPPORT_TABLE).upsert(
+    { employee_id: employeeId, amounts: amounts || {}, updated_at: new Date().toISOString() },
+    { onConflict: 'employee_id' }
+  ).select('*').single();
+  if (error) throw error;
+  return data;
+}

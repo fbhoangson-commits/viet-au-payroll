@@ -3,7 +3,8 @@ import * as XLSX from 'xlsx';
 import { Search, Upload, Download, FileSpreadsheet, RefreshCw, Pencil, Save, X, AlertCircle, CheckCircle2, Settings2, Eye } from 'lucide-react';
 import {
   fetchEmployeesForInsurance, fetchModuleRows, saveModuleRow, fetchTaxReliefConfig, saveTaxReliefConfig,
-  saveDependentRows, DEPENDENT_TABLE, INSURANCE_TABLE, COMMITMENT_TABLE, UNION_TABLE
+  saveDependentRows, DEPENDENT_TABLE, INSURANCE_TABLE, COMMITMENT_TABLE, UNION_TABLE,
+  fetchSupportColumns, saveSupportColumns, fetchSupportRows, saveSupportRow, SUPPORT_TABLE
 } from './services/insuranceDependentsService.js';
 import './styles/insurance-dependents.css';
 
@@ -12,6 +13,7 @@ const TABS = [
   { id: 'relief', label: 'Giảm Trừ Gia Cảnh', table: DEPENDENT_TABLE },
   { id: 'commitment', label: 'Cam Kết Thu Nhập', table: COMMITMENT_TABLE },
   { id: 'union', label: 'Công Đoàn', table: UNION_TABLE },
+  { id: 'support', label: 'Mức Hỗ Trợ', table: SUPPORT_TABLE },
 ];
 const money = n => n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 const yesNo = v => v === true ? 'Có' : v === false ? 'Không' : 'Chưa cấu hình';
@@ -100,6 +102,10 @@ export default function Page() {
   const [dependents, setDependents] = useState([]);
   const [commitments, setCommitments] = useState([]);
   const [unions, setUnions] = useState([]);
+  const [supportRows, setSupportRows] = useState([]);
+  const [supportColumns, setSupportColumns] = useState([{key:'lunch',label:'Ăn trưa',active:true,sort_order:1},{key:'phone',label:'Điện thoại',active:true,sort_order:2},{key:'uniform',label:'Đồng phục',active:true,sort_order:3}]);
+  const [supportSettings, setSupportSettings] = useState(false);
+  const [supportColumnDraft, setSupportColumnDraft] = useState([]);
   const [taxConfig, setTaxConfig] = useState({ personal_relief_amount: 15500000, dependent_relief_amount: 6200000 });
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
@@ -115,17 +121,17 @@ export default function Page() {
   const load = useCallback(async () => {
     setLoading(true); setMessage(null);
     try {
-      const [emps, ins, deps, comm, unionRows, tax] = await Promise.all([
+      const [emps, ins, deps, comm, unionRows, tax, supRows, supCols] = await Promise.all([
         fetchEmployeesForInsurance(), fetchModuleRows(INSURANCE_TABLE), fetchModuleRows(DEPENDENT_TABLE),
-        fetchModuleRows(COMMITMENT_TABLE), fetchModuleRows(UNION_TABLE), fetchTaxReliefConfig()
+        fetchModuleRows(COMMITMENT_TABLE), fetchModuleRows(UNION_TABLE), fetchTaxReliefConfig(), fetchSupportRows(), fetchSupportColumns()
       ]);
-      setEmployees(emps); setInsurance(ins); setDependents(deps); setCommitments(comm); setUnions(unionRows); setTaxConfig(tax);
+      setEmployees(emps); setInsurance(ins); setDependents(deps); setCommitments(comm); setUnions(unionRows); setTaxConfig(tax); setSupportRows(supRows); setSupportColumns([...supCols].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)));
     } catch (e) { setMessage({type:'error',text:`Không tải được dữ liệu Supabase: ${e.message || e}`}); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
   const rows = useMemo(() => {
-    const byTab = { insurance, relief: dependents, commitment: commitments, union: unions };
+    const byTab = { insurance, relief: dependents, commitment: commitments, union: unions, support: supportRows };
     const records = byTab[tab] || [];
     const byId = new Map();
     records.forEach(r => { const id = r.employee_id; if (id && !byId.has(id)) byId.set(id, r); });
@@ -163,10 +169,10 @@ export default function Page() {
       return { employee:e, record, dependentList: dependents.filter(d=>d.employee_id===e.id), masterDependentCount:masterCount, masterInsuranceStatus:masterInsurance };
     });
   }, [employees,insurance,dependents,commitments,unions,tab,search,filter]);
-  const fields = fieldsByTab[tab] || [];
+  const fields = tab === 'support' ? supportColumns.filter(c=>c.active!==false).map(c=>[c.key,c.label,'number']) : (fieldsByTab[tab] || []);
   const startEdit = item => {
-    const defaults = tab === 'insurance' ? { participates_insurance:item.masterInsuranceStatus ?? null } : tab === 'commitment' ? {has_commitment:false} : tab === 'union' ? {is_union_member:false} : {dependent_count:item.masterDependentCount ?? item.dependentList.length};
-    setEditing({ employee:item.employee, record:{...defaults,...(item.record||{}), employee_id:item.employee.id} });
+    const defaults = tab === 'insurance' ? { participates_insurance:item.masterInsuranceStatus ?? null } : tab === 'commitment' ? {has_commitment:false} : tab === 'union' ? {is_union_member:false} : tab === 'support' ? {...(item.record?.amounts||{})} : {dependent_count:item.masterDependentCount ?? item.dependentList.length};
+    setEditing({ employee:item.employee, record:{...defaults,...(tab==='support'?{}:(item.record||{})), employee_id:item.employee.id} });
   };
   const saveEdit = async () => {
     if (!editing) return;
@@ -181,6 +187,10 @@ export default function Page() {
         if (existing.length && payload.dependent_count !== existing.length) {
           setMessage({type:'warning',text:'Số lượng đã lưu khác số hồ sơ người phụ thuộc chi tiết. Hãy dùng “Quản lý hồ sơ” để chỉnh danh sách; không tự tạo hoặc xóa danh tính người phụ thuộc.'});
         }
+      } else if (tab === 'support') {
+        const amounts = {}; supportColumns.forEach(c=>{ const value=payload[c.key]; amounts[c.key] = value === '' || value == null ? 0 : Math.max(0, Number(value)||0); });
+        await saveSupportRow(editing.employee.id, amounts);
+        await load(); setMessage({type:'success',text:'Đã lưu mức hỗ trợ lên Supabase.'});
       } else {
         const table = activeTab.table;
         await saveModuleRow(table,payload);
@@ -192,17 +202,18 @@ export default function Page() {
     finally { setSaving(false); }
   };
   const exportRows = () => {
-    const tabFields = fieldsByTab[tab];
+    const tabFields = tab==='support' ? supportColumns.filter(c=>c.active!==false).map(c=>[c.key,c.label,'number']) : fieldsByTab[tab];
     const data = rows.map(({employee:e,record:r,dependentList}) => {
       const obj = {'Mã Nhân Viên':employeeCode(e),'Họ và Tên':employeeName(e),'Phòng ban':employeeDept(e),'Chức vụ':employeePosition(e)};
-      tabFields.forEach(([key,label,type]) => { obj[label] = key === 'dependent_count' ? (r?.dependent_count ?? dependentList.length) : (r?.[key] ?? ''); });
+      tabFields.forEach(([key,label,type]) => { obj[label] = key === 'dependent_count' ? (r?.dependent_count ?? dependentList.length) : tab==='support' ? (r?.amounts?.[key] ?? 0) : (r?.[key] ?? ''); });
+      if(tab==='support') obj['Tổng hỗ trợ'] = tabFields.reduce((sum,[key])=>sum+(Number(r?.amounts?.[key])||0),0);
       return obj;
     });
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),activeTab.label.slice(0,31));
     XLSX.writeFile(wb,`VietAu_${tab}_export.xlsx`);
   };
   const downloadTemplate = () => {
-    const tabFields = fieldsByTab[tab];
+    const tabFields = tab==='support' ? supportColumns.filter(c=>c.active!==false).map(c=>[c.key,c.label,'number']) : fieldsByTab[tab];
     const headers = ['Mã Nhân Viên',...tabFields.map(f=>f[1])];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([headers]),'Import');
@@ -225,7 +236,8 @@ export default function Page() {
       source.forEach((row,i) => {
         const mapped={};
         Object.entries(row).forEach(([header,value]) => {
-          const key = columnMap[norm(header)] || (fieldsByTab[tab].some(f=>f[0]===header) ? header : null);
+          const dynamicSupport = tab==='support' ? supportColumns.find(c=>norm(c.label)===norm(header))?.key : null;
+          const key = dynamicSupport || columnMap[norm(header)] || ((tab==='support'?supportColumns.map(c=>c.key):fieldsByTab[tab].map(f=>f[0])).includes(header) ? header : null);
           if (key) mapped[key]=value;
         });
         const code = mapped.employee_code || row['Mã Nhân Viên'] || row['Ma Nhan Vien'];
@@ -235,9 +247,9 @@ export default function Page() {
         seen.add(key);
         const employee=employeeByCode.get(key);
         if (!employee) { errors.push({row:i+2,reason:`Không tìm thấy mã ${code} trong Nhân Sự Master`}); return; }
-        const existing = (tab==='insurance'?insurance:tab==='relief'?dependents:tab==='commitment'?commitments:unions).find(r=>r.employee_id===employee.id);
-        const payload={...(existing||{}),employee_id:employee.id};
-        fieldsByTab[tab].forEach(([field,,type])=>{
+        const existing = (tab==='insurance'?insurance:tab==='relief'?dependents:tab==='commitment'?commitments:tab==='support'?supportRows:unions).find(r=>r.employee_id===employee.id);
+        const payload=tab==='support'?{...(existing?.amounts||{}),employee_id:employee.id}:{...(existing||{}),employee_id:employee.id};
+        (tab==='support'?supportColumns.filter(c=>c.active!==false).map(c=>[c.key,c.label,'number']):fieldsByTab[tab]).forEach(([field,,type])=>{
           if (!(field in mapped) || mapped[field] === '') return;
           let value=mapped[field];
           if(type==='number') { value=parseNumber(value); if(value===null) errors.push({row:i+2,reason:`Giá trị số không hợp lệ ở ${field}`}); }
@@ -255,7 +267,11 @@ export default function Page() {
     setSaving(true); let success=0; const errors=[...importPreview.errors];
     for(const item of importPreview.prepared) {
       try {
-        if(tab==='relief') {
+        if(tab==='support') {
+          const amounts={...(supportRows.find(r=>r.employee_id===item.employee.id)?.amounts||{})};
+          supportColumns.forEach(c=>{ if(item.payload[c.key]!==undefined) amounts[c.key]=Math.max(0,Number(item.payload[c.key])||0); });
+          await saveSupportRow(item.employee.id,amounts); success++;
+        } else if(tab==='relief') {
           // Summary counts are not person records; update the employees table is deliberately forbidden.
           const existing=dependents.filter(d=>d.employee_id===item.employee.id);
           if (item.payload.dependent_count !== undefined && Number(item.payload.dependent_count)!==existing.length) {
@@ -298,6 +314,7 @@ export default function Page() {
       <label className="id-btn"><Upload size={15}/> Import<input type="file" accept=".xlsx,.xls,.csv" hidden onChange={readImport}/></label>
       <button className="id-btn" onClick={exportRows}><Download size={15}/> Export</button>
       {tab==='relief' && <button className="id-btn" onClick={()=>setReliefSettings(true)}><Settings2 size={15}/> Cấu hình giảm trừ</button>}
+      {tab==='support' && <button className="id-btn" onClick={()=>{setSupportColumnDraft(supportColumns.map(c=>({...c})));setSupportSettings(true);}}><Settings2 size={15}/> Cấu hình cột hỗ trợ</button>}
       <div className="id-spacer"/>
       <div className="id-search"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã, họ tên, phòng ban..."/></div>
     </div>
@@ -314,6 +331,7 @@ export default function Page() {
         {tab==='relief'&&<><th>Số người phụ thuộc</th><th>Giảm trừ cá nhân</th><th>Giảm trừ phụ thuộc</th><th>Tổng giảm trừ</th></>}
         {tab==='commitment'&&<><th>Trạng thái cam kết</th><th>Ngày hiệu lực</th><th>Ngày hết hiệu lực</th><th>Hồ sơ / Ghi chú</th></>}
         {tab==='union'&&<><th>Trạng thái đoàn viên</th><th>Mức căn cứ</th><th>NLĐ đóng</th><th>Doanh nghiệp đóng</th><th>Ngày hiệu lực</th></>}
+        {tab==='support'&&<>{supportColumns.filter(c=>c.active!==false).map(c=><th key={c.key}>{c.label}</th>)}<th>Tổng hỗ trợ</th></>}
         <th>Thao tác</th></tr></thead><tbody>
         {loading?<tr><td colSpan="10" className="id-empty">Đang tải dữ liệu từ Supabase…</td></tr>:rows.map(item=>{const e=item.employee,r=item.record||{}, count=Number(r.dependent_count??item.dependentList.length)||0;return <tr key={e.id}>
           <td className="id-code">{employeeCode(e)||'—'}</td><td><strong>{employeeName(e)||'—'}</strong><small>{e.employee_group||e.employment_type||''}</small></td><td>{employeeDept(e)||'—'}<small>{employeePosition(e)||''}</small></td>
@@ -321,6 +339,7 @@ export default function Page() {
           {tab==='relief'&&<><td>{count} {item.masterDependentCount !== null ? <span className="id-pill" title="Tự liên kết từ Nhân Sự Master">Từ Master</span> : null} <button className="id-link" onClick={()=>openDependents(item)}>{item.dependentList.length?'Quản lý hồ sơ':'Thêm hồ sơ'}</button></td><td>{money(taxConfig.personal_relief_amount)} ₫</td><td>{money(count*Number(taxConfig.dependent_relief_amount||0))} ₫</td><td className="id-total">{money(Number(taxConfig.personal_relief_amount||0)+count*Number(taxConfig.dependent_relief_amount||0))} ₫</td></>}
           {tab==='commitment'&&<><td>{yesNo(r.has_commitment)}</td><td>{r.effective_from||'—'}</td><td>{r.effective_to||'—'}</td><td>{r.document_reference||r.notes||'—'}</td></>}
           {tab==='union'&&<><td>{yesNo(r.is_union_member)}</td><td>{money(r.contribution_base)}</td><td>{money(r.employee_contribution)}</td><td>{money(r.employer_contribution)}</td><td>{r.effective_from||'—'}</td></>}
+          {tab==='support'&&<>{supportColumns.filter(c=>c.active!==false).map(c=><td key={c.key}>{money(r.amounts?.[c.key]??0)}</td>)}<td className="id-total">{money(supportColumns.filter(c=>c.active!==false).reduce((sum,c)=>sum+(Number(r.amounts?.[c.key])||0),0))} ₫</td></>}
           <td className="id-actions">{tab!=='relief'&&<button className="id-icon-btn" onClick={()=>startEdit(item)} title="Sửa"><Pencil size={15}/></button>}{tab==='insurance'&&<button className="id-icon-btn" onClick={()=>setDependentsModal({insuranceDetails:true,employee:e})} title="Xem cấu phần tỷ lệ"><Eye size={15}/></button>}</td>
         </tr>})}
         {!loading&&!rows.length&&<tr><td colSpan="10" className="id-empty">Không có nhân sự phù hợp.</td></tr>}
@@ -328,6 +347,7 @@ export default function Page() {
     </div>
     <div className="id-footer">Hiển thị {rows.length}/{employees.length} nhân sự · Dữ liệu nhân sự đọc từ Master; các tỷ lệ và số tiền chưa cấu hình sẽ không tự suy diễn.</div>
     {editing&&<div className="id-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setEditing(null)}}><div className="id-modal"><div className="id-modal-head"><div><h3>Cập nhật {activeTab.label}</h3><p>{employeeCode(editing.employee)} · {employeeName(editing.employee)}</p></div><button className="id-icon-btn" onClick={()=>setEditing(null)}><X size={18}/></button></div><div className="id-form-grid">{fields.map(([key,label,type])=><label key={key}>{label}{type==='boolean'?<select value={editing.record[key]===true?'true':editing.record[key]===false?'false':''} onChange={e=>setEditing(old=>({...old,record:{...old.record,[key]:e.target.value===''?null:e.target.value==='true'}}))}><option value="">Chưa cấu hình</option><option value="true">Có</option><option value="false">Không</option></select>:type==='text'?<input value={editing.record[key]??''} onChange={e=>setEditing(old=>({...old,record:{...old.record,[key]:e.target.value}}))}/>:<input type={type==='date'?'date':'number'} min={type==='number'?'0':undefined} step={type==='number'?'any':undefined} value={editing.record[key]??''} onChange={e=>setEditing(old=>({...old,record:{...old.record,[key]:e.target.value===''?null:type==='number'?Number(e.target.value):e.target.value}}))}/>}</label>)}</div><div className="id-modal-actions"><button className="id-btn" onClick={()=>setEditing(null)}>Hủy</button><button className="id-btn primary" disabled={saving||tab==='relief'} onClick={saveEdit}><Save size={15}/> {saving?'Đang lưu…':'Lưu dữ liệu'}</button></div>{tab==='relief'&&<p className="id-help">Số lượng người phụ thuộc được xác định từ hồ sơ chi tiết. Hãy dùng “Quản lý hồ sơ” để thêm/sửa người phụ thuộc.</p>}</div></div>}
+    {supportSettings&&<div className="id-overlay"><div className="id-modal"><div className="id-modal-head"><div><h3>Cấu hình Mức Hỗ Trợ</h3><p>Thêm, đổi tên, sắp xếp hoặc ngừng hiển thị cột. Tổng hỗ trợ tự cộng các cột đang hoạt động.</p></div><button className="id-icon-btn" onClick={()=>setSupportSettings(false)}><X size={18}/></button></div><div className="id-dependent-list">{supportColumnDraft.map((c,i)=><div className="id-dependent-row" key={c.key} style={{gridTemplateColumns:'1fr 100px 100px 30px'}}><label>Tên cột<input value={c.label} onChange={e=>setSupportColumnDraft(a=>a.map((x,j)=>j===i?{...x,label:e.target.value}:x))}/></label><label>Thứ tự<input type="number" min="1" value={c.sort_order||i+1} onChange={e=>setSupportColumnDraft(a=>a.map((x,j)=>j===i?{...x,sort_order:Number(e.target.value)||i+1}:x))}/></label><label>Trạng thái<select value={c.active===false?'false':'true'} onChange={e=>setSupportColumnDraft(a=>a.map((x,j)=>j===i?{...x,active:e.target.value==='true'}:x))}><option value="true">Đang dùng</option><option value="false">Ngừng dùng</option></select></label><button className="id-icon-btn danger" title="Xóa cấu hình cột" onClick={()=>setSupportColumnDraft(a=>a.filter((_,j)=>j!==i))}><X size={15}/></button></div>)}</div><div className="id-modal-actions"><button className="id-btn" onClick={()=>setSupportColumnDraft(a=>[...a,{key:`support_${Date.now()}_${a.length}`,label:'Khoản hỗ trợ mới',active:true,sort_order:a.length+1}])}>+ Thêm cột</button><span className="id-spacer"/><button className="id-btn" onClick={()=>setSupportSettings(false)}>Hủy</button><button className="id-btn primary" disabled={saving||supportColumnDraft.some(c=>!String(c.label||'').trim())} onClick={async()=>{setSaving(true);try{const clean=supportColumnDraft.map((c,i)=>({...c,label:String(c.label).trim(),sort_order:Number(c.sort_order)||i+1})).sort((a,b)=>a.sort_order-b.sort_order);const saved=await saveSupportColumns(clean);setSupportColumns(saved);setSupportSettings(false);setMessage({type:'success',text:'Đã lưu cấu hình cột hỗ trợ.'});}catch(e){setMessage({type:'error',text:`Không lưu được cấu hình: ${e.message||e}`});}finally{setSaving(false);}}}><Save size={15}/> Lưu cấu hình</button></div><p className="id-help">Không xóa dữ liệu các cột đã ngừng dùng; khi kích hoạt lại, dữ liệu cũ vẫn còn.</p></div></div>}
     {reliefSettings&&<div className="id-overlay"><div className="id-modal"><div className="id-modal-head"><div><h3>Cấu hình giảm trừ gia cảnh</h3><p>Thay đổi có hiệu lực cho phép tính tham chiếu tại module này.</p></div><button className="id-icon-btn" onClick={()=>setReliefSettings(false)}><X size={18}/></button></div><div className="id-form-grid"><label>Giảm trừ cá nhân (đồng)<input type="number" min="0" value={taxConfig.personal_relief_amount??''} onChange={e=>setTaxConfig(v=>({...v,personal_relief_amount:e.target.value}))}/></label><label>Giảm trừ mỗi người phụ thuộc (đồng)<input type="number" min="0" value={taxConfig.dependent_relief_amount??''} onChange={e=>setTaxConfig(v=>({...v,dependent_relief_amount:e.target.value}))}/></label></div><div className="id-modal-actions"><button className="id-btn" onClick={()=>setReliefSettings(false)}>Hủy</button><button className="id-btn primary" disabled={saving} onClick={saveTaxConfig}><Save size={15}/> Lưu cấu hình</button></div></div></div>}
     {dependentsModal&&dependentsModal.insuranceDetails&&<div className="id-overlay"><div className="id-modal"><div className="id-modal-head"><div><h3>Chi tiết tỷ lệ đóng</h3><p>{employeeCode(dependentsModal.employee)} · {employeeName(dependentsModal.employee)}</p></div><button className="id-icon-btn" onClick={()=>setDependentsModal(null)}><X size={18}/></button></div>{detailInsurance({record:insurance.find(r=>r.employee_id===dependentsModal.employee.id)})}<div className="id-modal-actions"><button className="id-btn" onClick={()=>setDependentsModal(null)}>Đóng</button></div></div></div>}
     {dependentsModal&&!dependentsModal.insuranceDetails&&<div className="id-overlay"><div className="id-modal id-dependent-modal"><div className="id-modal-head"><div><h3>Hồ sơ người phụ thuộc</h3><p>{employeeCode(dependentsModal)} · {employeeName(dependentsModal)}</p></div><button className="id-icon-btn" onClick={()=>setDependentsModal(null)}><X size={18}/></button></div><div className="id-dependent-list">{dependentDraft.map((d,i)=><div className="id-dependent-row" key={d.id||i}><label>Họ và tên<input value={d.full_name||''} onChange={e=>setDependentDraft(a=>a.map((x,j)=>j===i?{...x,full_name:e.target.value}:x))}/></label><label>Quan hệ<input value={d.relationship||''} onChange={e=>setDependentDraft(a=>a.map((x,j)=>j===i?{...x,relationship:e.target.value}:x))}/></label><label>Ngày sinh<input type="date" value={d.date_of_birth||''} onChange={e=>setDependentDraft(a=>a.map((x,j)=>j===i?{...x,date_of_birth:e.target.value}:x))}/></label><label>MST / giấy tờ<input value={d.tax_code||d.identification_number||''} onChange={e=>setDependentDraft(a=>a.map((x,j)=>j===i?{...x,tax_code:e.target.value}:x))}/></label><button className="id-icon-btn danger" onClick={()=>setDependentDraft(a=>a.filter((_,j)=>j!==i))}><X size={15}/></button></div>)}</div><div className="id-modal-actions"><button className="id-btn" onClick={()=>setDependentDraft(a=>[...a,{full_name:'',relationship:'',status:'Đang giảm trừ'}])}>+ Thêm người phụ thuộc</button><span className="id-spacer"/><button className="id-btn" onClick={()=>setDependentsModal(null)}>Hủy</button><button className="id-btn primary" disabled={saving} onClick={saveDependents}><Save size={15}/> Lưu hồ sơ</button></div><p className="id-help">Chỉ lưu hồ sơ được nhập; không tự suy diễn quan hệ, MST hoặc thời gian giảm trừ.</p></div></div>}
