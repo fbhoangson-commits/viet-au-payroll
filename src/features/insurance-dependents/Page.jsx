@@ -47,6 +47,7 @@ const masterDependentCount = employee => {
 const masterInsuranceStatus = employee => {
   const field = masterField(employee, ['social_insurance','Tham gia BHXH','BHXH','Có tham gia BHXH']);
   return field.found ? masterBoolean(field.value) : null;
+};
 const parseNumber = v => {
   if (typeof v === 'number') return v;
   let s = String(v ?? '').trim().replace(/[₫đ\s]/gi, '');
