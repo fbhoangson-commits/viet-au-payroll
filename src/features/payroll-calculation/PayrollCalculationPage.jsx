@@ -231,17 +231,29 @@ export default function PayrollCalculationPage({ page }) {
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
-          const recordRateRows=valuesByEmployee.get(employeeId(rec))||[];
-          const allEmployeeRateRows=rateValues.filter(v=>employeeId(v)===employeeId(rec));
-          const rv=recordRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||allEmployeeRateRows.find(v=>clean(v.group_id)===clean(col.group_id))||rateRows.find(v=>clean(v.group_id)===clean(col.group_id));
-          const rateValuesObject=rv?.values && typeof rv.values==='object' ? rv.values : {};
+          // Resolve IELTS and other teaching rates from the exact employee + group + column.
+          // Do not rely only on the selected policy map: existing rate rows may be saved under a
+          // different/missing policy_version_id while still being the employee's configured rate.
+          const recordEmployeeId=employeeId(rec);
+          const recordEmployeeCode=codeOf(rec).toLocaleUpperCase('vi');
+          const rateRowsForEmployee=rateValues.filter(v =>
+            (recordEmployeeId && employeeId(v)===recordEmployeeId) ||
+            (recordEmployeeCode && codeOf(v).toLocaleUpperCase('vi')===recordEmployeeCode)
+          );
+          const preferredRows=[
+            ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
+            ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
+            ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
+          ];
+          const rv=preferredRows.find(v=>clean(v.group_id)===clean(col.group_id));
+          const values=rv?.values && typeof rv.values==='object' ? rv.values : {};
           const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
           let rate;
-          for(const key of rateKeys){ if(Object.prototype.hasOwnProperty.call(rateValuesObject,key) && rateValuesObject[key]!==undefined && rateValuesObject[key]!==null && rateValuesObject[key]!==''){ rate=rateValuesObject[key]; break; } }
+          for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
           if(rate===undefined){
             const wanted=new Set(rateKeys.map(norm));
-            const matchedKey=Object.keys(rateValuesObject).find(key=>wanted.has(norm(key)));
-            if(matchedKey!==undefined) rate=rateValuesObject[matchedKey];
+            const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key)));
+            if(matchedKey!==undefined) rate=values[matchedKey];
           }
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
