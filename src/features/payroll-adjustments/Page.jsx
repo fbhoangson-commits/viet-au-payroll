@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../../shared/supabase.js';
-import { Plus, RefreshCw, Search, Pencil, Trash2, X, Save, Wallet, ArrowDownUp, CalendarDays, AlertCircle, CheckCircle2, Coins, History } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { Plus, RefreshCw, Search, Pencil, Trash2, X, Save, Wallet, ArrowDownUp, CalendarDays, AlertCircle, CheckCircle2, Coins, History, Download, Upload, FileSpreadsheet } from 'lucide-react';
 import './payroll-adjustments.css';
 
 const ADJUSTMENTS = 'payroll_adjustments';
@@ -15,6 +16,47 @@ const nameOf = e => String(e?.employee_name || e?.full_name || e?.name || codeOf
 const initialAdjustment = () => ({ period_id:'', employee_id:'', employee_ids:[], amount_mode:'PER_EMPLOYEE', kind:'ADD', name:'', amount:'', effective_date:today(), description:'', status:'ACTIVE' });
 const initialAdvance = () => ({ employee_id:'', advance_date:today(), amount:'', description:'', start_period_id:'', status:'ACTIVE' });
 const errorText = e => e?.message || String(e || 'Đã xảy ra lỗi.');
+const csvCell = value => { const text = String(value ?? ''); return /[\",\r\n]/.test(text) ? `\"${text.replace(/\"/g,'\"\"')}\"` : text; };
+const downloadCsv = (filename, headers, rows) => {
+  const content = '\uFEFF' + [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob); const link = document.createElement('a');
+  link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+};
+const downloadWorkbook = (filename, headers, rows, guidance) => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  sheet['!cols'] = headers.map(h => ({ wch: Math.max(14, Math.min(30, String(h).length + 4)) }));
+  XLSX.utils.book_append_sheet(workbook, sheet, 'DuLieu');
+  const guideSheet = XLSX.utils.aoa_to_sheet([['HƯỚNG DẪN IMPORT'], ['1. Không sửa tên các cột ở dòng đầu tiên.'], ['2. Mỗi dòng tương ứng một bản ghi.'], ['3. Mã nhân viên phải tồn tại trong hệ thống.'], ['4. Số tiền nhập bằng số nguyên VNĐ, không kèm ký hiệu tiền tệ.'], ['5. Ngày nhập theo định dạng YYYY-MM-DD.'], ...guidance.map(line => [line])]);
+  guideSheet['!cols'] = [{ wch: 95 }];
+  XLSX.utils.book_append_sheet(workbook, guideSheet, 'HuongDan');
+  XLSX.writeFile(workbook, filename);
+};
+const normalizeHeader = value => String(value ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+const normalizeDate = value => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0,10);
+  if (typeof value === 'number' && Number.isFinite(value)) { const d = XLSX.SSF.parse_date_code(value); if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`; }
+  const text = String(value ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const match = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  return match ? `${match[3]}-${String(match[2]).padStart(2,'0')}-${String(match[1]).padStart(2,'0')}` : text;
+};
+const parseCsv = text => {
+  const input = String(text || '').replace(/^\uFEFF/, ''); const rows = []; let row = []; let cell = ''; let quoted = false;
+  for (let i=0; i<input.length; i++) { const ch=input[i];
+    if (quoted) { if (ch==='\"' && input[i+1]==='\"') { cell+='\"'; i++; } else if (ch==='\"') quoted=false; else cell+=ch; }
+    else if (ch==='\"' && cell==='') quoted=true;
+    else if (ch===',') { row.push(cell); cell=''; }
+    else if (ch==='\n') { row.push(cell.replace(/\r$/, '')); if (row.some(v=>v.trim()!=='')) rows.push(row); row=[]; cell=''; }
+    else cell+=ch;
+  }
+  if (cell.length || row.length) { row.push(cell.replace(/\r$/, '')); if (row.some(v=>v.trim()!=='')) rows.push(row); }
+  if (!rows.length) return [];
+  const headers=rows.shift().map(v=>v.trim().toLowerCase().replace(/\s+/g,'_'));
+  return rows.map(values=>Object.fromEntries(headers.map((h,i)=>[h,String(values[i] ?? '').trim()])));
+};
+const csvNumber = value => Number(String(value ?? '').replace(/[\s₫đ]/gi,'').replace(/\.(?=\d{3}(?:\D|$))/g,'').replace(/,/g,'.'));
 
 export default function Page() {
   const [tab, setTab] = useState('adjustments');
@@ -36,6 +78,8 @@ export default function Page() {
   const [advanceForm, setAdvanceForm] = useState(initialAdvance());
   const [recoveryForm, setRecoveryForm] = useState({ advance_id:'', period_id:'', amount:'', notes:'' });
   const [recoveryFor, setRecoveryFor] = useState(null);
+  const importInputRef = useRef(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase || !isSupabaseConfigured) { setMessage({type:'error', text:'Chưa cấu hình Supabase. Không thể tải hoặc lưu dữ liệu.'}); setLoading(false); return; }
@@ -170,12 +214,96 @@ export default function Page() {
     catch(e){setMessage({type:'error',text:`Không hủy được kế hoạch: ${errorText(e)}`});}
   };
 
+  const exportCurrent = () => {
+    if (tab === 'adjustments') {
+      downloadWorkbook(`khoan-cong-tru-${currentPeriod?.code || 'ky-luong'}.xlsx`,
+        ['employee_code','employee_name','period_code','kind','name','amount','effective_date','description','status'],
+        visibleAdjustments.map(r=>[r.employee_code,r.employee_name,currentPeriod?.code || '',r.kind,r.name,r.amount,r.effective_date || '',r.description || '',r.status]), ['kind chỉ nhận ADD hoặc DEDUCT; status chỉ nhận ACTIVE hoặc CANCELLED.']);
+    } else {
+      downloadWorkbook('tam-ung.xlsx',
+        ['employee_code','employee_name','advance_date','amount','description','start_period_code','status'],
+        visibleAdvances.map(r=>[r.employee_code,r.employee_name,r.advance_date,r.amount,r.description || '',periods.find(p=>p.id===r.start_period_id)?.code || '',r.status]), ['status chỉ nhận ACTIVE hoặc CANCELLED. start_period_code là mã kỳ lương cố định, có thể để trống.']);
+    }
+    setMessage({type:'success',text:'Đã xuất file Excel (.xlsx) theo danh sách đang hiển thị, kèm sheet hướng dẫn.'});
+  };
+  const downloadTemplate = () => {
+    if (tab === 'adjustments') downloadWorkbook('mau-import-khoan-cong-tru.xlsx',
+      ['employee_code','kind','name','amount','effective_date','description','status'], [], ['Mỗi nhân sự phải thuộc danh sách đã chốt của kỳ lương đang chọn.', 'kind: ADD = Khoản Cộng; DEDUCT = Khoản Trừ.']);
+    else downloadWorkbook('mau-import-tam-ung.xlsx',
+      ['employee_code','advance_date','amount','description','start_period_code','status'], [], ['employee_code phải tồn tại trong Nhân Sự Master.', 'start_period_code phải là mã kỳ lương cố định đang tồn tại nếu có nhập.']);
+    setMessage({type:'success',text:'Đã tải mẫu Excel trống gồm sheet dữ liệu và sheet hướng dẫn.'});
+  };
+  const importCsvFile = async file => {
+    if (!file) return;
+    if (importBusy) return;
+    if (tab==='adjustments' && (!periodId || currentPeriod?.status==='CLOSED')) {
+      setMessage({type:'error',text:'Hãy chọn kỳ lương đang mở trước khi import Khoản Cộng Trừ.'}); return;
+    }
+    if (!window.confirm(`Import dữ liệu ${tab==='adjustments'?'Khoản Cộng Trừ':'Tạm Ứng'} từ file ${file.name}? Dữ liệu hợp lệ sẽ được thêm mới; các dòng trùng đã có sẽ được bỏ qua.`)) return;
+    setImportBusy(true); setMessage(null);
+    try {
+      let rows;
+      if (/\.csv$/i.test(file.name)) rows = parseCsv(await file.text());
+      else {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type:'array', cellDates:true });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        if (!firstSheet) throw new Error('Không tìm thấy sheet dữ liệu trong file Excel.');
+        const rawRows = XLSX.utils.sheet_to_json(firstSheet, { defval:'', raw:true });
+        rows = rawRows.map(raw => Object.fromEntries(Object.entries(raw).map(([key,value]) => [normalizeHeader(key), value])));
+      }
+      rows = rows.map(row => Object.fromEntries(Object.entries(row).map(([key,value]) => [normalizeHeader(key), value])));
+      if (!rows.length) throw new Error('File không có dữ liệu. Hãy dùng mẫu CSV và điền các dòng dữ liệu.');
+      const userId=(await supabase.auth.getUser()).data?.user?.id || null;
+      const errors=[]; let skipped=0; let inserted=0;
+      if (tab==='adjustments') {
+        const payloads=[];
+        rows.forEach((r,i)=>{
+          const line=i+2; const empCode=String(r.employee_code || r.ma_nhan_vien || '').trim();
+          const snap=snapshots.find(x=>String(x.employee_code||'').trim().toLowerCase()===empCode.toLowerCase());
+          const rawKind=String(r.kind || r.loai_khoan || '').trim().toUpperCase();
+          const kind=['ADD','KHOẢN CỘNG','KHOAN CONG','CỘNG','CONG'].includes(rawKind)?'ADD':['DEDUCT','KHOẢN TRỪ','KHOAN TRU','TRỪ','TRU'].includes(rawKind)?'DEDUCT':'';
+          const amount=csvNumber(r.amount ?? r.so_tien);
+          const name=String(r.name || r.ten_khoan || '').trim();
+          const date=normalizeDate(r.effective_date || r.ngay_ghi_nhan || today());
+          const status=String(r.status || r.trang_thai || 'ACTIVE').trim().toUpperCase();
+          if (!snap) { errors.push(`Dòng ${line}: Mã nhân viên ${empCode || '(trống)'} không thuộc danh sách đã chốt của kỳ.`); return; }
+          if (!kind || !name || !Number.isFinite(amount) || amount<=0 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !['ACTIVE','CANCELLED'].includes(status)) { errors.push(`Dòng ${line}: dữ liệu không hợp lệ (kind, name, amount, effective_date, status).`); return; }
+          const duplicate=adjustments.some(a=>a.period_id===periodId && a.employee_id===snap.employee_id && a.kind===kind && String(a.name||'').trim().toLowerCase()===name.toLowerCase() && Number(a.amount)===amount && a.effective_date===date && a.status===status);
+          if (duplicate) { skipped++; return; }
+          payloads.push({period_id:periodId,employee_id:snap.employee_id,employee_code:snap.employee_code,employee_name:snap.employee_name,kind,name,amount,effective_date:date,description:String(r.description||r.ghi_chu||'').trim()||null,status,created_by:userId,updated_at:new Date().toISOString()});
+        });
+        if (payloads.length) { const {data,error}=await supabase.from(ADJUSTMENTS).insert(payloads).select('*'); if(error) throw error; setAdjustments(old=>[...(data||[]),...old]); inserted=data?.length||0; }
+      } else {
+        const payloads=[];
+        rows.forEach((r,i)=>{
+          const line=i+2; const empCode=String(r.employee_code || r.ma_nhan_vien || '').trim();
+          const employee=employees.find(e=>codeOf(e).toLowerCase()===empCode.toLowerCase());
+          const amount=csvNumber(r.amount ?? r.so_tien); const date=normalizeDate(r.advance_date || r.ngay_tam_ung || today());
+          const status=String(r.status || r.trang_thai || 'ACTIVE').trim().toUpperCase();
+          const periodCode=String(r.start_period_code || r.ma_ky_bat_dau_thu_hoi || '').trim();
+          const startPeriod=periodCode ? periods.find(p=>String(p.code||'').toLowerCase()===periodCode.toLowerCase() && p.type==='FIXED') : null;
+          if (!employee) { errors.push(`Dòng ${line}: không tìm thấy mã nhân viên ${empCode || '(trống)'}.`); return; }
+          if (!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!['ACTIVE','CANCELLED'].includes(status)||(periodCode&&!startPeriod)) { errors.push(`Dòng ${line}: dữ liệu không hợp lệ (ngày, số tiền, trạng thái hoặc mã kỳ thu hồi).`); return; }
+          const description=String(r.description||r.noi_dung||'').trim()||null;
+          const duplicate=advances.some(a=>a.employee_id===employee.id&&a.advance_date===date&&Number(a.amount)===amount&&String(a.description||'')===String(description||''));
+          if (duplicate) { skipped++; return; }
+          payloads.push({employee_id:employee.id,employee_code:codeOf(employee),employee_name:nameOf(employee),advance_date:date,amount,description,start_period_id:startPeriod?.id||null,status,created_by:userId,updated_at:new Date().toISOString()});
+        });
+        if (payloads.length) { const {data,error}=await supabase.from(ADVANCES).insert(payloads).select('*'); if(error) throw error; setAdvances(old=>[...(data||[]),...old]); inserted=data?.length||0; }
+      }
+      const errorSummary=errors.length ? ` Có ${errors.length} dòng lỗi: ${errors.slice(0,5).join(' | ')}${errors.length>5?' …':''}` : '';
+      setMessage({type:errors.length?'error':'success',text:`Import xong: thêm ${inserted} dòng, bỏ qua ${skipped} dòng trùng.${errorSummary}`});
+    } catch(e) { setMessage({type:'error',text:`Import thất bại: ${errorText(e)}`}); }
+    finally { setImportBusy(false); if(importInputRef.current) importInputRef.current.value=''; }
+  };
+
   return <section className="pa-page">
     <div className="pa-heading"><div className="pa-title-icon"><Wallet size={21}/></div><div><div className="pa-eyebrow">DỮ LIỆU KỲ LƯƠNG</div><h2>Khoản Bổ Sung</h2><p>Quản lý khoản cộng/trừ và lịch sử tạm ứng của nhân sự.</p></div><button className="pa-btn" onClick={load} disabled={loading}><RefreshCw size={14}/> Làm mới</button></div>
     <div className="pa-tabs"><button className={tab==='adjustments'?'active':''} onClick={()=>{setTab('adjustments');setMessage(null)}}><ArrowDownUp size={15}/> Khoản Cộng Trừ</button><button className={tab==='advances'?'active':''} onClick={()=>{setTab('advances');setMessage(null)}}><Wallet size={15}/> Tạm Ứng</button></div>
+    <input ref={importInputRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden onChange={e=>importCsvFile(e.target.files?.[0])}/>
     {message && <div className={`pa-message ${message.type}`}><span>{message.type==='error'?<AlertCircle size={16}/>:<CheckCircle2 size={16}/>}</span><div>{message.text}</div><button onClick={()=>setMessage(null)} aria-label="Đóng thông báo"><X size={14}/></button></div>}
     {tab==='adjustments' ? <>
-      <div className="pa-toolbar"><label className="pa-select-label">Kỳ lương<select value={periodId} onChange={e=>setPeriodId(e.target.value)}><option value="">-- Chọn kỳ lương --</option>{periods.map(p=><option key={p.id} value={p.id}>{periodLabel(p)} · {p.status==='CLOSED'?'Đã đóng':p.status==='OPEN'?'Đang mở':'Bản nháp'}</option>)}</select></label><label className="pa-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã NV, họ tên, tên khoản..."/></label><select value={kindFilter} onChange={e=>setKindFilter(e.target.value)}><option value="ALL">Tất cả loại khoản</option><option value="ADD">Khoản Cộng</option><option value="DEDUCT">Khoản Trừ</option></select><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="ALL">Tất cả trạng thái</option><option value="ACTIVE">Đang áp dụng</option><option value="CANCELLED">Đã hủy</option></select><span className="pa-grow"/><button className="pa-btn primary" onClick={()=>openAdjustment(null)} disabled={!periodId||currentPeriod?.status==='CLOSED'}><Plus size={15}/> Thêm khoản</button></div>
+      <div className="pa-toolbar"><label className="pa-select-label">Kỳ lương<select value={periodId} onChange={e=>setPeriodId(e.target.value)}><option value="">-- Chọn kỳ lương --</option>{periods.map(p=><option key={p.id} value={p.id}>{periodLabel(p)} · {p.status==='CLOSED'?'Đã đóng':p.status==='OPEN'?'Đang mở':'Bản nháp'}</option>)}</select></label><label className="pa-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã NV, họ tên, tên khoản..."/></label><select value={kindFilter} onChange={e=>setKindFilter(e.target.value)}><option value="ALL">Tất cả loại khoản</option><option value="ADD">Khoản Cộng</option><option value="DEDUCT">Khoản Trừ</option></select><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="ALL">Tất cả trạng thái</option><option value="ACTIVE">Đang áp dụng</option><option value="CANCELLED">Đã hủy</option></select><span className="pa-grow"/><button className="pa-btn" onClick={downloadTemplate} title="Tải mẫu Excel"><FileSpreadsheet size={14}/> Mẫu Import</button><button className="pa-btn" onClick={()=>importInputRef.current?.click()} disabled={importBusy||!periodId||currentPeriod?.status==='CLOSED'} title="Import Excel hoặc CSV"><Upload size={14}/> {importBusy?'Đang import…':'Import'}</button><button className="pa-btn" onClick={exportCurrent} title="Export Excel"><Download size={14}/> Export</button><button className="pa-btn primary" onClick={()=>openAdjustment(null)} disabled={!periodId||currentPeriod?.status==='CLOSED'}><Plus size={15}/> Thêm khoản</button></div>
       {currentPeriod?.status==='CLOSED'&&<div className="pa-note warning">Kỳ lương đã đóng. Dữ liệu chỉ được xem, không thể thêm, sửa hoặc xóa.</div>}
       {!periods.length&&!loading&&<div className="pa-note">Chưa có kỳ lương. Hãy tạo kỳ tại menu Quản Lý Kỳ Lương trước khi ghi nhận khoản cộng/trừ.</div>}
       {periodId&&snapshots.length===0&&!loading&&<div className="pa-note warning">Kỳ này chưa có danh sách nhân sự đã chốt trong <code>payroll_period_employees</code>. Không thể ghi khoản cộng/trừ cho đến khi dữ liệu kỳ được xác minh.</div>}
@@ -183,7 +311,7 @@ export default function Page() {
       <div className="pa-table-wrap"><table className="pa-table"><thead><tr><th>Nhân sự</th><th>Loại khoản</th><th>Tên khoản</th><th>Ngày ghi nhận</th><th>Số tiền</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visibleAdjustments.map(row=><tr key={row.id}><td><strong>{row.employee_name}</strong><small>{row.employee_code}</small></td><td><span className={`pa-pill ${row.kind==='ADD'?'add':'deduct'}`}>{row.kind==='ADD'?'Khoản Cộng':'Khoản Trừ'}</span></td><td><strong>{row.name}</strong>{row.description&&<small>{row.description}</small>}</td><td>{dateLabel(row.effective_date)}</td><td className="pa-money">{money(row.amount)}</td><td><span className={`pa-pill ${row.status==='ACTIVE'?'active':'cancelled'}`}>{row.status==='ACTIVE'?'Đang áp dụng':'Đã hủy'}</span></td><td><div className="pa-actions"><button className="pa-icon-btn" title="Sửa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>openAdjustment(row)}><Pencil size={14}/></button><button className="pa-icon-btn danger" title="Xóa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>deleteAdjustment(row)}><Trash2 size={14}/></button></div></td></tr>)}{!visibleAdjustments.length&&<tr><td colSpan="7" className="pa-empty">{loading?'Đang tải dữ liệu…':periodId?'Chưa có khoản cộng/trừ phù hợp trong kỳ này.':'Chọn kỳ lương để xem dữ liệu.'}</td></tr>}</tbody></table></div>
       <div className="pa-footnote">Nhân sự được chọn theo danh sách đã chốt của kỳ lương. Tổng hợp trên màn hình chỉ gồm các khoản đang áp dụng; việc kết nối tự động vào công thức tính lương cần được kiểm thử cùng module TÍNH LƯƠNG.</div>
     </> : <>
-      <div className="pa-toolbar"><label className="pa-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã NV, họ tên, mã tạm ứng..."/></label><span className="pa-grow"/><button className="pa-btn" onClick={()=>{setRecoveryFor(null);setRecoveryForm({advance_id:'',period_id:'',amount:'',notes:''});setModal('recovery')}}><CalendarDays size={15}/> Lập kế hoạch thu hồi</button><button className="pa-btn primary" onClick={()=>openAdvance(null)}><Plus size={15}/> Tạo tạm ứng</button></div>
+      <div className="pa-toolbar"><label className="pa-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã NV, họ tên, mã tạm ứng..."/></label><span className="pa-grow"/><button className="pa-btn" onClick={downloadTemplate} title="Tải mẫu Excel"><FileSpreadsheet size={14}/> Mẫu Import</button><button className="pa-btn" onClick={()=>importInputRef.current?.click()} disabled={importBusy} title="Import Excel hoặc CSV"><Upload size={14}/> {importBusy?'Đang import…':'Import'}</button><button className="pa-btn" onClick={exportCurrent} title="Export Excel"><Download size={14}/> Export</button><button className="pa-btn" onClick={()=>{setRecoveryFor(null);setRecoveryForm({advance_id:'',period_id:'',amount:'',notes:''});setModal('recovery')}}><CalendarDays size={15}/> Lập kế hoạch thu hồi</button><button className="pa-btn primary" onClick={()=>openAdvance(null)}><Plus size={15}/> Tạo tạm ứng</button></div>
       <div className="pa-summary"><div><span>Tổng tạm ứng</span><strong>{money(visibleAdvances.reduce((s,a)=>s+Number(a.amount||0),0))}</strong></div><div><span>Đã thu hồi / đã ghi nhận</span><strong>{money(visibleAdvances.reduce((s,a)=>s+recoveryTotal(a.id),0))}</strong></div><div><span>Còn phải thu hồi</span><strong>{money(visibleAdvances.reduce((s,a)=>s+balance(a),0))}</strong></div></div>
       <div className="pa-table-wrap"><table className="pa-table"><thead><tr><th>Mã tạm ứng</th><th>Nhân sự</th><th>Ngày tạm ứng</th><th>Tổng tạm ứng</th><th>Đã thu hồi</th><th>Còn phải thu hồi</th><th>Kỳ dự kiến bắt đầu</th><th>Thao tác</th></tr></thead><tbody>{visibleAdvances.map(row=><tr key={row.id}><td><strong>{row.code || `TU-${String(row.id).slice(0,8).toUpperCase()}`}</strong><small>{row.description||'Không có ghi chú'}</small></td><td><strong>{row.employee_name}</strong><small>{row.employee_code}</small></td><td>{dateLabel(row.advance_date)}</td><td className="pa-money">{money(row.amount)}</td><td>{money(recoveryTotal(row.id))}</td><td className="pa-money">{money(balance(row))}</td><td>{periodLabel(periods.find(p=>p.id===row.start_period_id))}</td><td><div className="pa-actions"><button className="pa-icon-btn" title="Lập thu hồi" onClick={()=>{setRecoveryForm({advance_id:row.id,period_id:'',amount:String(balance(row)||''),notes:''});setModal('recovery')}} disabled={availableToPlan(row)<=0||row.status!=='ACTIVE'}><Coins size={14}/></button><button className="pa-icon-btn" title="Sửa" onClick={()=>openAdvance(row)}><Pencil size={14}/></button><button className="pa-icon-btn" title="Lịch sử thu hồi" onClick={()=>setRecoveryFor(row)}><History size={14}/></button></div></td></tr>)}{!visibleAdvances.length&&<tr><td colSpan="8" className="pa-empty">{loading?'Đang tải dữ liệu…':'Chưa có hồ sơ tạm ứng.'}</td></tr>}</tbody></table></div>
       {recoveryFor&&<div className="pa-card"><div className="pa-card-heading"><div><h3>Lịch sử thu hồi · {recoveryFor.employee_name}</h3><p>{recoveryFor.employee_code} · Còn phải thu hồi: {money(balance(recoveryFor))} · Đã lập kế hoạch: {money(plannedTotal(recoveryFor.id))}</p></div><button className="pa-icon-btn" onClick={()=>setRecoveryFor(null)}><X size={14}/></button></div><div className="pa-table-wrap"><table className="pa-table"><thead><tr><th>Kỳ lương</th><th>Số tiền</th><th>Trạng thái</th><th>Ghi chú</th><th></th></tr></thead><tbody>{recoveries.filter(r=>r.advance_id===recoveryFor.id).map(r=><tr key={r.id}><td>{periodLabel(periods.find(p=>p.id===r.period_id))}</td><td>{money(r.amount)}</td><td><span className={`pa-pill ${r.status==='CANCELLED'?'cancelled':r.status==='POSTED'?'active':'planned'}`}>{r.status==='CANCELLED'?'Đã hủy':r.status==='POSTED'?'Đã ghi nhận':'Dự kiến'}</span></td><td>{r.notes||'—'}</td><td><button className="pa-icon-btn danger" title="Hủy kế hoạch" disabled={r.status!=='PLANNED'} onClick={()=>cancelRecovery(r)}><Trash2 size={14}/></button></td></tr>)}{!recoveries.some(r=>r.advance_id===recoveryFor.id)&&<tr><td colSpan="5" className="pa-empty">Chưa có lịch sử thu hồi.</td></tr>}</tbody></table></div></div>}
