@@ -165,7 +165,7 @@ export default function PayrollCalculationPage({ page }) {
         valuesByEmployee.get(key).push(r);
       }
       const selectedRateColumns=columns.filter(c=>c.is_active!==false);
-      const rateGroupName = c => norm(groupsById.get(clean(c.group_id))?.name || groupsById.get(clean(c.group_id))?.code || '');
+      const rateGroupName = c => { const g=groupsById.get(clean(c.group_id))||{}; return norm(`${g.name||''} ${g.code||''}`); };
       const isFixedGroup = c => { const n=rateGroupName(c); return n.includes('fixed') || n.includes('co dinh'); };
       const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('other') || n.includes('teaching') || n.includes('tutoring'); };
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
