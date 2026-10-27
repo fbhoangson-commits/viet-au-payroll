@@ -282,7 +282,49 @@ export default function Page() {
           <div className="pp-column-list">{[...columns].sort((a,b) => a.display_order-b.display_order).map((col, i) => <div className={`pp-column-row ${!col.is_active ? 'inactive' : ''}`} key={col.id}><div><strong>{col.label}</strong><small>{col.key} · {({currency:'Tiền tệ',number:'Số',text:'Văn bản',date:'Ngày'})[col.data_type] || col.data_type}{col.is_required ? ' · Bắt buộc' : ''}</small></div><div className="pp-row-actions"><button className="pp-icon-button" title="Lên" disabled={i === 0} onClick={() => moveColumn(col, -1)}>↑</button><button className="pp-icon-button" title="Xuống" disabled={i === columns.length - 1} onClick={() => moveColumn(col, 1)}>↓</button><button className="pp-icon-button" title="Sửa" onClick={() => editColumn(col)}><Edit3 size={14}/></button><button className="pp-button small secondary" onClick={() => toggleColumn(col)}>{col.is_active ? 'Ngừng dùng' : 'Kích hoạt'}</button></div></div>)}</div>
         </div>}
         {importReport && <div className={`pp-import-report ${importReport.errors.length ? 'has-errors' : ''}`}><strong>{importReport.success ? `Import thành công ${importReport.success}/${importReport.total} dòng.` : `Kiểm tra ${importReport.total} dòng: ${importReport.errors.length} lỗi.`}</strong>{importReport.errors.slice(0, 30).map((item, i) => <div key={`${item.row}-${i}`}>Dòng {item.row}: {item.reason}</div>)}{importReport.errors.length > 30 && <small>Còn {importReport.errors.length - 30} lỗi khác.</small>}</div>}
-        <div className="pp-table-wrap"><table className="pp-table pp-data-table"><thead><tr><th>Mã Nhân Viên</th><th>Họ và Tên</th>{activeColumns.map(c => <th key={c.id}>{c.label}</th>)}<th>Tổng tiền</th></tr></thead><tbody>{values.length ? values.map(v => <tr key={v.id}><td><strong>{v.employee_code}</strong></td><td>{v.employee_name || employeeName(employees.find(e => e.id === v.employee_id) || {})}</td>{activeColumns.map(c => <td key={c.id}>{c.data_type === 'currency' || c.data_type === 'number' ? formatNumber(v.data_values?.[c.key] ?? 0) : (v.data_values?.[c.key] || '—')}</td>)}<td><strong>{formatNumber(activeColumns.filter(c => c.data_type === 'currency' || c.data_type === 'number').reduce((sum,c) => sum + (Number(v.data_values?.[c.key]) || 0), 0))}</strong></td></tr>) : <tr><td colSpan={activeColumns.length + 3} className="pp-empty">Chưa có dữ liệu. Hãy tải template hoặc import Excel theo Mã Nhân Viên.</td>}</tbody></table></div>
+        <div className="pp-table-wrap">
+          <table className="pp-table pp-data-table">
+            <thead>
+              <tr>
+                <th>Mã Nhân Viên</th>
+                <th>Họ và Tên</th>
+                {activeColumns.map((column) => (
+                  <th key={column.id}>{column.label}</th>
+                ))}
+                <th>Tổng tiền</th>
+              </tr>
+            </thead>
+            <tbody>
+              {values.map((value) => {
+                const numericTotal = activeColumns
+                  .filter((column) => column.data_type === 'currency' || column.data_type === 'number')
+                  .reduce((sum, column) => sum + (Number(value.data_values?.[column.key]) || 0), 0);
+                const matchedEmployee = employees.find((employee) => employee.id === value.employee_id) || {};
+                return (
+                  <tr key={value.id}>
+                    <td><strong>{value.employee_code}</strong></td>
+                    <td>{value.employee_name || employeeName(matchedEmployee)}</td>
+                    {activeColumns.map((column) => (
+                      <td key={column.id}>
+                        {column.data_type === 'currency' || column.data_type === 'number'
+                          ? formatNumber(value.data_values?.[column.key] ?? 0)
+                          : (value.data_values?.[column.key] || '—')}
+                      </td>
+                    ))}
+                    <td><strong>{formatNumber(numericTotal)}</strong></td>
+                  </tr>
+                );
+              })}
+              {!values.length && (
+                <tr>
+                  <td colSpan={activeColumns.length + 3} className="pp-empty">
+                    Chưa có dữ liệu. Hãy tải template hoặc import Excel theo Mã Nhân Viên.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </>}
     </section>}
   </section>;
