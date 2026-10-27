@@ -12,8 +12,26 @@ const dateLabel = value => value ? new Date(`${String(value).slice(0,10)}T00:00:
 const today = () => new Date().toISOString().slice(0,10);
 const currentMonth = () => new Date().toISOString().slice(0,7);
 const codeOf = e => String(e?.employee_code || e?.code || '').trim();
+const periodKeyOf = p => {
+  const value = String(p?.month || p?.code || p?.name || '').trim();
+  const match = value.match(/(20\d{2})[-/](0[1-9]|1[0-2])/);
+  if (match) return `${match[1]}-${match[2]}`;
+  const compact = value.match(/(20\d{2})(0[1-9]|1[0-2])$/);
+  return compact ? `${compact[1]}-${compact[2]}` : '';
+};
+const monthKey = value => {
+  const text = String(value ?? '').trim();
+  if (/^20\d{2}-(0[1-9]|1[0-2])$/.test(text)) return text;
+  const match = text.match(/^(20\d{2})[/.](0?[1-9]|1[0-2])$/);
+  return match ? `${match[1]}-${String(match[2]).padStart(2,'0')}` : '';
+};
+const adjustmentStatus = value => {
+  const text = String(value ?? '').trim().toLocaleLowerCase('vi');
+  if (['đã hủy','da huy','cancelled','canceled','inactive'].includes(text)) return 'CANCELLED';
+  return ['đang áp dụng','dang ap dung','active','áp dụng'].includes(text) ? 'ACTIVE' : '';
+};
 const nameOf = e => String(e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
-const initialAdjustment = () => ({ period_id:'', employee_id:'', employee_ids:[], amount_mode:'PER_EMPLOYEE', kind:'ADD', name:'', amount:'', effective_date:today(), description:'', status:'ACTIVE' });
+const initialAdjustment = () => ({ period_id:'', employee_id:'', employee_ids:[], amount_mode:'PER_EMPLOYEE', kind:'ADD', application_type:'PER_PERIOD', quantity:'1', unit:'Tháng', unit_price:'0', name:'', amount:'0', period_code:'', effective_from:currentMonth(), effective_to:'', effective_date:today(), description:'', status:'ACTIVE' });
 const initialAdvance = () => ({ employee_id:'', advance_date:today(), amount:'', description:'', start_period_id:'', status:'ACTIVE' });
 const errorText = e => e?.message || String(e || 'Đã xảy ra lỗi.');
 const csvCell = value => { const text = String(value ?? ''); return /[\",\r\n]/.test(text) ? `\"${text.replace(/\"/g,'\"\"')}\"` : text; };
@@ -119,11 +137,20 @@ export default function Page() {
   const periodLabel = p => p ? `${p.code || p.name}${p.month ? ` · ${p.month}` : ''}` : '—';
   const visibleAdjustments = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('vi');
-    return adjustments.filter(r => r.period_id === periodId)
+    const selectedKey = periodKeyOf(currentPeriod);
+    return adjustments.filter(r => {
+      const mode = r.application_type || 'PER_PERIOD';
+      if (mode === 'FIXED') {
+        const from = monthKey(r.effective_from);
+        const to = monthKey(r.effective_to);
+        return Boolean(selectedKey && from && selectedKey >= from && (!to || selectedKey <= to));
+      }
+      return r.period_id === periodId || (r.period_code && String(r.period_code) === String(currentPeriod?.code));
+    })
       .filter(r => kindFilter === 'ALL' || r.kind === kindFilter)
       .filter(r => statusFilter === 'ALL' || r.status === statusFilter)
       .filter(r => !q || [r.employee_code,r.employee_name,r.name,r.description,r.code].some(v => String(v || '').toLocaleLowerCase('vi').includes(q)));
-  }, [adjustments, periodId, kindFilter, statusFilter, search]);
+  }, [adjustments, periodId, currentPeriod, kindFilter, statusFilter, search]);
   const visibleAdvances = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('vi');
     return advances.filter(r => !q || [r.employee_code,r.employee_name,r.code,r.description].some(v => String(v || '').toLocaleLowerCase('vi').includes(q)));
@@ -138,7 +165,14 @@ export default function Page() {
 
   const openAdjustment = row => {
     if (currentPeriod?.status === 'CLOSED') { setMessage({type:'error',text:'Kỳ lương đã đóng. Không thể thêm hoặc sửa khoản trong kỳ này.'}); return; }
-    setAdjustmentForm(row ? { period_id:row.period_id, employee_id:row.employee_id, employee_ids:[row.employee_id], amount_mode:'PER_EMPLOYEE', kind:row.kind, name:row.name || '', amount:String(row.amount ?? ''), effective_date:row.effective_date || today(), description:row.description || '', status:row.status || 'ACTIVE', id:row.id } : {...initialAdjustment(),period_id:periodId});
+    setAdjustmentForm(row ? {
+      period_id:row.period_id, employee_id:row.employee_id, employee_ids:[row.employee_id], amount_mode:'PER_EMPLOYEE',
+      kind:row.kind, application_type:row.application_type || 'PER_PERIOD', quantity:String(row.quantity ?? 1),
+      unit:row.unit || 'Tháng', unit_price:String(row.unit_price ?? row.amount ?? 0), name:row.name || '',
+      amount:String(row.amount ?? ''), period_code:row.period_code || '', effective_from:row.effective_from || periodKeyOf(currentPeriod) || currentMonth(),
+      effective_to:row.effective_to || '', effective_date:row.effective_date || today(), description:row.description || '',
+      status:row.status || 'ACTIVE', id:row.id
+    } : {...initialAdjustment(),period_id:periodId,effective_from:periodKeyOf(currentPeriod) || currentMonth()});
     setModal('adjustment'); setMessage(null);
   };
   const openAdvance = row => {
@@ -147,18 +181,43 @@ export default function Page() {
   };
   const saveAdjustment = async event => {
     event.preventDefault(); if (saving) return;
-    const amount = Number(String(adjustmentForm.amount).replace(/\s/g,'').replace(/,/g,''));
-    if (!adjustmentForm.period_id || !adjustmentForm.employee_id || !adjustmentForm.name.trim() || !Number.isFinite(amount) || amount <= 0) { setMessage({type:'error',text:'Vui lòng chọn kỳ lương, nhân sự, nhập tên khoản và số tiền lớn hơn 0.'}); return; }
-    if (currentPeriod?.status === 'CLOSED') { setMessage({type:'error',text:'Kỳ lương đã đóng, không thể ghi dữ liệu.'}); return; }
+    const quantity = csvNumber(adjustmentForm.quantity);
+    const unitPrice = csvNumber(adjustmentForm.unit_price);
+    const amount = quantity * unitPrice;
+    const mode = adjustmentForm.application_type || 'PER_PERIOD';
+    const from = monthKey(adjustmentForm.effective_from);
+    const to = monthKey(adjustmentForm.effective_to);
+    const targetPeriod = mode === 'FIXED'
+      ? (periods.find(p => periodKeyOf(p) === from) || currentPeriod)
+      : periods.find(p => p.id === adjustmentForm.period_id);
+    if (!targetPeriod || !adjustmentForm.name.trim() || !Number.isFinite(quantity) || quantity < 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isFinite(amount) || amount < 0) {
+      setMessage({type:'error',text:'Vui lòng nhập đầy đủ tên khoản, số lượng và đơn giá hợp lệ.'}); return;
+    }
+    if (mode === 'FIXED' && (!from || (to && to < from))) {
+      setMessage({type:'error',text:'Khoản Cố định cần có kỳ Áp dụng từ hợp lệ; kỳ Áp dụng đến phải lớn hơn hoặc bằng kỳ bắt đầu.'}); return;
+    }
+    if (mode === 'PER_PERIOD' && (!adjustmentForm.period_id || targetPeriod.status === 'CLOSED')) {
+      setMessage({type:'error',text:'Khoản Theo kỳ phải gắn với một kỳ lương đang mở.'}); return;
+    }
+    if (currentPeriod?.status === 'CLOSED') { setMessage({type:'error',text:'Kỳ lương đang chọn đã đóng, không thể ghi dữ liệu.'}); return; }
     const selectedIds = adjustmentForm.id ? [adjustmentForm.employee_id] : [...new Set(adjustmentForm.employee_ids || [])];
     if (!selectedIds.length) { setMessage({type:'error',text:'Vui lòng chọn ít nhất một nhân sự thuộc danh sách đã chốt của kỳ lương.'}); return; }
     const selectedSnapshots = selectedIds.map(id => snapshotById.get(id)).filter(Boolean);
     if (selectedSnapshots.length !== selectedIds.length) { setMessage({type:'error',text:'Có nhân sự không thuộc danh sách đã chốt của kỳ đang chọn. Vui lòng tải lại dữ liệu.'}); return; }
-    if (!adjustmentForm.id && adjustmentForm.amount_mode === 'SPLIT_TOTAL' && amount < selectedSnapshots.length) { setMessage({type:'error',text:'Tổng số tiền phải đủ để phân bổ ít nhất 1 đồng cho mỗi nhân sự.'}); return; }
     setSaving(true); setMessage(null);
     try {
       const userId = (await supabase.auth.getUser()).data?.user?.id || null;
-      const payloads = selectedSnapshots.map((snap,index) => ({period_id:adjustmentForm.period_id,employee_id:snap.employee_id,employee_code:snap.employee_code,employee_name:snap.employee_name,kind:adjustmentForm.kind,name:adjustmentForm.name.trim(),amount:adjustmentForm.amount_mode==='SPLIT_TOTAL'&&!adjustmentForm.id ? Math.floor(amount/selectedSnapshots.length)+(index < amount%selectedSnapshots.length ? 1 : 0) : amount,effective_date:adjustmentForm.effective_date || today(),description:adjustmentForm.description.trim() || null,status:adjustmentForm.status,updated_at:new Date().toISOString(),...(!adjustmentForm.id?{created_by:userId}:{})}));
+      const payloads = selectedSnapshots.map((snap,index) => ({
+        period_id: targetPeriod.id, period_code: mode === 'PER_PERIOD' ? (targetPeriod.code || periodKeyOf(targetPeriod)) : null,
+        employee_id:snap.employee_id, employee_code:snap.employee_code, employee_name:snap.employee_name,
+        kind:adjustmentForm.kind, application_type:mode, quantity, unit:String(adjustmentForm.unit || '').trim() || null,
+        unit_price:unitPrice, name:adjustmentForm.name.trim(),
+        amount:adjustmentForm.amount_mode==='SPLIT_TOTAL'&&!adjustmentForm.id ? Math.floor(amount/selectedSnapshots.length)+(index < amount%selectedSnapshots.length ? 1 : 0) : amount,
+        effective_from:mode === 'FIXED' ? from : periodKeyOf(targetPeriod),
+        effective_to:mode === 'FIXED' ? (to || null) : null,
+        effective_date:adjustmentForm.effective_date || today(), description:adjustmentForm.description.trim() || null,
+        status:adjustmentForm.status, updated_at:new Date().toISOString(), ...(!adjustmentForm.id?{created_by:userId}:{})
+      }));
       if (adjustmentForm.id) {
         const result = await supabase.from(ADJUSTMENTS).update(payloads[0]).eq('id',adjustmentForm.id).select('*').single();
         if (result.error) throw result.error;
@@ -216,9 +275,19 @@ export default function Page() {
 
   const exportCurrent = () => {
     if (tab === 'adjustments') {
-      downloadWorkbook(`khoan-cong-tru-${currentPeriod?.code || 'ky-luong'}.xlsx`,
-        ['employee_code','employee_name','period_code','kind','name','amount','effective_date','description','status'],
-        visibleAdjustments.map(r=>[r.employee_code,r.employee_name,currentPeriod?.code || '',r.kind,r.name,r.amount,r.effective_date || '',r.description || '',r.status]), ['kind chỉ nhận ADD hoặc DEDUCT; status chỉ nhận ACTIVE hoặc CANCELLED.']);
+      downloadWorkbook(`KHOAN_CONG_TRU_${periodKeyOf(currentPeriod) || 'ky-luong'}.xlsx`,
+        ['MNV','Họ tên','Tên khoản','Loại khoản','Dạng áp dụng','Số lượng','Đơn vị tính','Đơn giá','Thành tiền','Số tiền','Kỳ áp dụng','Áp dụng từ','Áp dụng đến','Ghi chú','Trạng thái'],
+        visibleAdjustments.map(r=>[
+          r.employee_code,r.employee_name,r.name,r.kind==='ADD'?'Cộng':'Trừ',
+          (r.application_type || 'PER_PERIOD')==='FIXED'?'Cố định':'Theo kỳ',
+          Number(r.quantity ?? 1),r.unit || '',Number(r.unit_price ?? r.amount ?? 0),
+          Number(r.amount || 0),Number(r.amount || 0),
+          (r.application_type || 'PER_PERIOD')==='FIXED'?'':(periodKeyOf(periods.find(p=>p.id===r.period_id)) || periodKeyOf(currentPeriod) || ''),
+          r.effective_from || periodKeyOf(periods.find(p=>p.id===r.period_id)) || '',
+          r.effective_to || '',r.description || '',
+          r.status==='CANCELLED'?'Đã hủy':'Đang áp dụng'
+        ]),
+        ['MNV phải khớp với Nhân Sự Master.','Import tạo bản ghi mới, không sửa hoặc xóa bản ghi cũ.','Cố định: áp dụng từ kỳ bắt đầu đến kỳ kết thúc; để trống kỳ kết thúc nếu chưa xác định.','Theo kỳ: chỉ áp dụng đúng kỳ lương ghi trong cột Kỳ áp dụng.','Thành tiền = Số lượng × Đơn giá.','Loại khoản: Cộng hoặc Trừ.','Dạng áp dụng: Cố định hoặc Theo kỳ.']);
     } else {
       downloadWorkbook('tam-ung.xlsx',
         ['employee_code','employee_name','advance_date','amount','description','start_period_code','status'],
@@ -227,8 +296,9 @@ export default function Page() {
     setMessage({type:'success',text:'Đã xuất file Excel (.xlsx) theo danh sách đang hiển thị, kèm sheet hướng dẫn.'});
   };
   const downloadTemplate = () => {
-    if (tab === 'adjustments') downloadWorkbook('mau-import-khoan-cong-tru.xlsx',
-      ['employee_code','kind','name','amount','effective_date','description','status'], [], ['Mỗi nhân sự phải thuộc danh sách đã chốt của kỳ lương đang chọn.', 'kind: ADD = Khoản Cộng; DEDUCT = Khoản Trừ.']);
+    if (tab === 'adjustments') downloadWorkbook('KHOAN_CONG_TRU_MAU_IMPORT.xlsx',
+      ['MNV','Họ tên','Tên khoản','Loại khoản','Dạng áp dụng','Số lượng','Đơn vị tính','Đơn giá','Thành tiền','Số tiền','Kỳ áp dụng','Áp dụng từ','Áp dụng đến','Ghi chú','Trạng thái'], [],
+      ['MNV phải khớp với Nhân Sự Master.','Import sẽ tạo bản ghi mới, không sửa hoặc xóa bản ghi cũ.','Cố định: áp dụng từ kỳ bắt đầu đến kỳ kết thúc (để trống kỳ kết thúc nếu chưa xác định).','Theo kỳ: chỉ áp dụng đúng kỳ lương ghi trong cột Kỳ áp dụng.','Thành tiền = Số lượng × Đơn giá.','Loại khoản chỉ nhận Cộng hoặc Trừ.','Dạng áp dụng chỉ nhận Cố định hoặc Theo kỳ.','Kỳ và thời gian áp dụng dùng định dạng YYYY-MM.','Dữ liệu import được lưu trên Supabase.']);
     else downloadWorkbook('mau-import-tam-ung.xlsx',
       ['employee_code','advance_date','amount','description','start_period_code','status'], [], ['employee_code phải tồn tại trong Nhân Sự Master.', 'start_period_code phải là mã kỳ lương cố định đang tồn tại nếu có nhập.']);
     setMessage({type:'success',text:'Đã tải mẫu Excel trống gồm sheet dữ liệu và sheet hướng dẫn.'});
@@ -258,21 +328,58 @@ export default function Page() {
       if (tab==='adjustments') {
         const payloads=[];
         rows.forEach((r,i)=>{
-          const line=i+2; const empCode=String(r.employee_code || r.ma_nhan_vien || '').trim();
-          const snap=snapshots.find(x=>String(x.employee_code||'').trim().toLowerCase()===empCode.toLowerCase());
-          const rawKind=String(r.kind || r.loai_khoan || '').trim().toUpperCase();
-          const kind=['ADD','KHOẢN CỘNG','KHOAN CONG','CỘNG','CONG'].includes(rawKind)?'ADD':['DEDUCT','KHOẢN TRỪ','KHOAN TRU','TRỪ','TRU'].includes(rawKind)?'DEDUCT':'';
-          const amount=csvNumber(r.amount ?? r.so_tien);
-          const name=String(r.name || r.ten_khoan || '').trim();
-          const date=normalizeDate(r.effective_date || r.ngay_ghi_nhan || today());
-          const status=String(r.status || r.trang_thai || 'ACTIVE').trim().toUpperCase();
-          if (!snap) { errors.push(`Dòng ${line}: Mã nhân viên ${empCode || '(trống)'} không thuộc danh sách đã chốt của kỳ.`); return; }
-          if (!kind || !name || !Number.isFinite(amount) || amount<=0 || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !['ACTIVE','CANCELLED'].includes(status)) { errors.push(`Dòng ${line}: dữ liệu không hợp lệ (kind, name, amount, effective_date, status).`); return; }
-          const duplicate=adjustments.some(a=>a.period_id===periodId && a.employee_id===snap.employee_id && a.kind===kind && String(a.name||'').trim().toLowerCase()===name.toLowerCase() && Number(a.amount)===amount && a.effective_date===date && a.status===status);
+          const line=i+2;
+          const empCode=String(r.mnv || r.employee_code || r.ma_nhan_vien || '').trim();
+          const employee=employees.find(e=>codeOf(e).toLowerCase()===empCode.toLowerCase());
+          const rawKind=String(r.loai_khoan || r.kind || '').trim().toLocaleLowerCase('vi');
+          const kind=['add','cộng','cong','khoản cộng','khoan cong'].includes(rawKind)?'ADD':['deduct','trừ','tru','khoản trừ','khoan tru'].includes(rawKind)?'DEDUCT':'';
+          const rawMode=String(r.dang_ap_dung || r.application_type || '').trim().toLocaleLowerCase('vi');
+          const applicationType=['cố định','co dinh','fixed'].includes(rawMode)?'FIXED':['theo kỳ','theo ky','per_period'].includes(rawMode)?'PER_PERIOD':'';
+          const name=String(r.ten_khoan || r.name || '').trim();
+          const quantityRaw=r.so_luong === '' || r.so_luong == null ? 0 : csvNumber(r.so_luong);
+          const unit=String(r.don_vi_tinh || r.unit || '').trim();
+          const unitPrice=csvNumber(r.don_gia ?? r.unit_price);
+          const suppliedRaw=[r.thanh_tien,r.so_tien,r.amount].find(v=>v!==undefined && String(v).trim()!=='');
+          const suppliedAmount=suppliedRaw===undefined ? calculatedAmount : csvNumber(suppliedRaw);
+          const calculatedAmount=quantityRaw*unitPrice;
+          const amount=Number.isFinite(suppliedAmount) && (r.thanh_tien !== undefined || r.so_tien !== undefined || r.amount !== undefined) ? suppliedAmount : calculatedAmount;
+          const periodCode=String(r.ky_ap_dung || r.period_code || '').trim();
+          const from=monthKey(r.ap_dung_tu || r.effective_from);
+          const to=monthKey(r.ap_dung_den || r.effective_to);
+          const targetPeriodCode=applicationType==='FIXED' ? (from || periodKeyOf(currentPeriod)) : monthKey(periodCode) || periodCode;
+          const targetPeriod=periods.find(p => periodKeyOf(p)===targetPeriodCode || String(p.code||'').trim().toLowerCase()===targetPeriodCode.toLowerCase())
+            || (applicationType==='FIXED' && targetPeriodCode ? periods.find(p=>periodKeyOf(p)===targetPeriodCode) : null);
+          const status=adjustmentStatus(r.trang_thai || r.status || 'Đang áp dụng');
+          const description=String(r.ghi_chu || r.description || '').trim() || null;
+          if (!employee) { errors.push(`Dòng ${line}: MNV ${empCode || '(trống)'} không tồn tại trong Nhân Sự Master.`); return; }
+          if (!kind || !applicationType || !name || !Number.isFinite(quantityRaw) || quantityRaw<0 || !Number.isFinite(unitPrice) || unitPrice<0 || !Number.isFinite(amount) || amount<0 || !status) {
+            errors.push(`Dòng ${line}: thiếu hoặc sai Tên khoản, Loại khoản, Dạng áp dụng, Số lượng, Đơn vị tính, Đơn giá, Thành tiền/Số tiền hoặc Trạng thái.`); return;
+          }
+          if (Math.abs(calculatedAmount-amount)>0.5) { errors.push(`Dòng ${line}: Thành tiền/Số tiền (${amount}) không khớp Số lượng × Đơn giá (${calculatedAmount}).`); return; }
+          if (applicationType==='FIXED' && (!from || (to && to<from))) { errors.push(`Dòng ${line}: Cố định cần kỳ Áp dụng từ hợp lệ và Áp dụng đến không được trước kỳ bắt đầu.`); return; }
+          if (applicationType==='PER_PERIOD' && (!periodCode || !targetPeriod)) { errors.push(`Dòng ${line}: Theo kỳ cần Kỳ áp dụng khớp kỳ lương hiện có.`); return; }
+          const effectivePeriod=targetPeriod || currentPeriod;
+          if (!effectivePeriod) { errors.push(`Dòng ${line}: không xác định được kỳ lương gốc cho khoản.`); return; }
+          const duplicate=adjustments.some(a=>
+            a.employee_id===employee.id && a.kind===kind && String(a.name||'').trim().toLowerCase()===name.toLowerCase() &&
+            (a.application_type||'PER_PERIOD')===applicationType && Number(a.amount)===amount &&
+            (applicationType==='FIXED' ? monthKey(a.effective_from)===from && monthKey(a.effective_to)===to : a.period_id===effectivePeriod.id)
+          );
           if (duplicate) { skipped++; return; }
-          payloads.push({period_id:periodId,employee_id:snap.employee_id,employee_code:snap.employee_code,employee_name:snap.employee_name,kind,name,amount,effective_date:date,description:String(r.description||r.ghi_chu||'').trim()||null,status,created_by:userId,updated_at:new Date().toISOString()});
+          payloads.push({
+            period_id:effectivePeriod.id, period_code:applicationType==='PER_PERIOD'?(effectivePeriod.code || periodKeyOf(effectivePeriod)):null,
+            employee_id:employee.id, employee_code:codeOf(employee), employee_name:nameOf(employee), kind,
+            application_type:applicationType, quantity:quantityRaw, unit, unit_price:unitPrice, name, amount,
+            effective_from:applicationType==='FIXED'?from:periodKeyOf(effectivePeriod),
+            effective_to:applicationType==='FIXED'?(to||null):null,
+            effective_date:today(), description, status, created_by:userId, updated_at:new Date().toISOString()
+          });
         });
-        if (payloads.length) { const {data,error}=await supabase.from(ADJUSTMENTS).insert(payloads).select('*'); if(error) throw error; setAdjustments(old=>[...(data||[]),...old]); inserted=data?.length||0; }
+        if (payloads.length) {
+          const {data,error}=await supabase.from(ADJUSTMENTS).insert(payloads).select('*');
+          if(error) throw error;
+          setAdjustments(old=>[...(data||[]),...old]); inserted=data?.length||0;
+        }
       } else {
         const payloads=[];
         rows.forEach((r,i)=>{
@@ -308,7 +415,7 @@ export default function Page() {
       {!periods.length&&!loading&&<div className="pa-note">Chưa có kỳ lương. Hãy tạo kỳ tại menu Quản Lý Kỳ Lương trước khi ghi nhận khoản cộng/trừ.</div>}
       {periodId&&snapshots.length===0&&!loading&&<div className="pa-note warning">Kỳ này chưa có danh sách nhân sự đã chốt trong <code>payroll_period_employees</code>. Không thể ghi khoản cộng/trừ cho đến khi dữ liệu kỳ được xác minh.</div>}
       <div className="pa-summary"><div><span>Tổng Khoản Cộng đang áp dụng</span><strong>{money(totals.add)}</strong></div><div><span>Tổng Khoản Trừ đang áp dụng</span><strong>{money(totals.deduct)}</strong></div><div><span>Chênh lệch</span><strong className={totals.add-totals.deduct<0?'negative':'positive'}>{money(totals.add-totals.deduct)}</strong></div></div>
-      <div className="pa-table-wrap"><table className="pa-table"><thead><tr><th>Nhân sự</th><th>Loại khoản</th><th>Tên khoản</th><th>Ngày ghi nhận</th><th>Số tiền</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visibleAdjustments.map(row=><tr key={row.id}><td><strong>{row.employee_name}</strong><small>{row.employee_code}</small></td><td><span className={`pa-pill ${row.kind==='ADD'?'add':'deduct'}`}>{row.kind==='ADD'?'Khoản Cộng':'Khoản Trừ'}</span></td><td><strong>{row.name}</strong>{row.description&&<small>{row.description}</small>}</td><td>{dateLabel(row.effective_date)}</td><td className="pa-money">{money(row.amount)}</td><td><span className={`pa-pill ${row.status==='ACTIVE'?'active':'cancelled'}`}>{row.status==='ACTIVE'?'Đang áp dụng':'Đã hủy'}</span></td><td><div className="pa-actions"><button className="pa-icon-btn" title="Sửa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>openAdjustment(row)}><Pencil size={14}/></button><button className="pa-icon-btn danger" title="Xóa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>deleteAdjustment(row)}><Trash2 size={14}/></button></div></td></tr>)}{!visibleAdjustments.length&&<tr><td colSpan="7" className="pa-empty">{loading?'Đang tải dữ liệu…':periodId?'Chưa có khoản cộng/trừ phù hợp trong kỳ này.':'Chọn kỳ lương để xem dữ liệu.'}</td></tr>}</tbody></table></div>
+      <div className="pa-table-wrap"><table className="pa-table"><thead><tr><th>Nhân sự</th><th>Tên khoản</th><th>Loại</th><th>Dạng áp dụng</th><th>Số lượng</th><th>Đơn vị</th><th>Đơn giá</th><th>Thành tiền</th><th>Kỳ áp dụng</th><th>Thời hạn</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>{visibleAdjustments.map(row=><tr key={row.id}><td><strong>{row.employee_name}</strong><small>{row.employee_code}</small></td><td><strong>{row.name}</strong>{row.description&&<small>{row.description}</small>}</td><td><span className={`pa-pill ${row.kind==='ADD'?'add':'deduct'}`}>{row.kind==='ADD'?'Cộng':'Trừ'}</span></td><td>{(row.application_type||'PER_PERIOD')==='FIXED'?'Cố định':'Theo kỳ'}</td><td>{Number(row.quantity ?? 1).toLocaleString('vi-VN')}</td><td>{row.unit||'—'}</td><td className="pa-money">{money(row.unit_price ?? row.amount)}</td><td className="pa-money">{money(row.amount)}</td><td>{(row.application_type||'PER_PERIOD')==='FIXED'?'—':periodKeyOf(periods.find(p=>p.id===row.period_id))}</td><td>{(row.application_type||'PER_PERIOD')==='FIXED'?`${row.effective_from||'—'} → ${row.effective_to||'Không giới hạn'}`:(row.effective_from||periodKeyOf(periods.find(p=>p.id===row.period_id)))}</td><td><span className={`pa-pill ${row.status==='ACTIVE'?'active':'cancelled'}`}>{row.status==='ACTIVE'?'Đang áp dụng':'Đã hủy'}</span></td><td><div className="pa-actions"><button className="pa-icon-btn" title="Sửa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>openAdjustment(row)}><Pencil size={14}/></button><button className="pa-icon-btn danger" title="Xóa" disabled={currentPeriod?.status==='CLOSED'} onClick={()=>deleteAdjustment(row)}><Trash2 size={14}/></button></div></td></tr>)}{!visibleAdjustments.length&&<tr><td colSpan="12" className="pa-empty">{loading?'Đang tải dữ liệu…':periodId?'Chưa có khoản cộng/trừ phù hợp trong kỳ này.':'Chọn kỳ lương để xem dữ liệu.'}</td></tr>}</tbody></table></div>
       <div className="pa-footnote">Nhân sự được chọn theo danh sách đã chốt của kỳ lương. Tổng hợp trên màn hình chỉ gồm các khoản đang áp dụng; việc kết nối tự động vào công thức tính lương cần được kiểm thử cùng module TÍNH LƯƠNG.</div>
     </> : <>
       <div className="pa-toolbar"><label className="pa-search"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã NV, họ tên, mã tạm ứng..."/></label><span className="pa-grow"/><button className="pa-btn" onClick={downloadTemplate} title="Tải mẫu Excel"><FileSpreadsheet size={14}/> Mẫu Import</button><button className="pa-btn" onClick={()=>importInputRef.current?.click()} disabled={importBusy} title="Import Excel hoặc CSV"><Upload size={14}/> {importBusy?'Đang import…':'Import'}</button><button className="pa-btn" onClick={exportCurrent} title="Export Excel"><Download size={14}/> Export</button><button className="pa-btn" onClick={()=>{setRecoveryFor(null);setRecoveryForm({advance_id:'',period_id:'',amount:'',notes:''});setModal('recovery')}}><CalendarDays size={15}/> Lập kế hoạch thu hồi</button><button className="pa-btn primary" onClick={()=>openAdvance(null)}><Plus size={15}/> Tạo tạm ứng</button></div>
@@ -319,7 +426,7 @@ export default function Page() {
     </>}
 
     {modal&&<div className="pa-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget&&!saving)setModal(null)}}><div className="pa-modal" role="dialog" aria-modal="true"><div className="pa-modal-head"><div><h3>{modal==='adjustment'?(adjustmentForm.id?'Sửa khoản cộng/trừ':'Thêm khoản cộng/trừ'):modal==='advance'?(advanceForm.id?'Sửa hồ sơ tạm ứng':'Tạo khoản tạm ứng'):'Lập kế hoạch thu hồi tạm ứng'}</h3><p>Dữ liệu được lưu trực tiếp trên Supabase.</p></div><button className="pa-icon-btn" onClick={()=>setModal(null)} disabled={saving}><X size={15}/></button></div>
-      {modal==='adjustment'&&<form onSubmit={saveAdjustment}><div className="pa-form-grid"><label>Kỳ lương<select value={adjustmentForm.period_id} onChange={e=>setAdjustmentForm(f=>({...f,period_id:e.target.value,employee_id:''}))} required><option value="">-- Chọn kỳ --</option>{periods.filter(p=>p.id===periodId&&p.status!=='CLOSED').map(p=><option key={p.id} value={p.id}>{periodLabel(p)}</option>)}</select></label><label className="full">Nhân sự thuộc kỳ<select multiple value={adjustmentForm.id?[adjustmentForm.employee_id]:adjustmentForm.employee_ids} disabled={Boolean(adjustmentForm.id)} onChange={e=>setAdjustmentForm(f=>({...f,employee_ids:Array.from(e.target.selectedOptions).map(o=>o.value)}))} required size={Math.min(6,Math.max(3,eligibleEmployees.length))}>{eligibleEmployees.map(e=><option key={e.id} value={e.id}>{e.employee_code} · {e.employee_name}</option>)}</select><small>Giữ Ctrl để chọn nhiều nhân sự. Danh sách lấy từ nhân sự đã chốt của kỳ đang chọn.</small></label><label>Loại khoản<select value={adjustmentForm.kind} onChange={e=>setAdjustmentForm(f=>({...f,kind:e.target.value}))}><option value="ADD">Khoản Cộng</option><option value="DEDUCT">Khoản Trừ</option></select></label><label>Tên khoản<input value={adjustmentForm.name} onChange={e=>setAdjustmentForm(f=>({...f,name:e.target.value}))} required maxLength={160} placeholder="Nhập tên khoản"/></label><label>Số tiền (VNĐ)<input type="number" min="1" step="1" value={adjustmentForm.amount} onChange={e=>setAdjustmentForm(f=>({...f,amount:e.target.value}))} required/></label>{!adjustmentForm.id&&<label>Cách áp dụng số tiền<select value={adjustmentForm.amount_mode} onChange={e=>setAdjustmentForm(f=>({...f,amount_mode:e.target.value}))}><option value="PER_EMPLOYEE">Số tiền cho mỗi nhân sự</option><option value="SPLIT_TOTAL">Tổng tiền chia đều cho nhân sự đã chọn</option></select></label>}<label>Ngày ghi nhận<input type="date" value={adjustmentForm.effective_date} onChange={e=>setAdjustmentForm(f=>({...f,effective_date:e.target.value}))} required/></label><label>Trạng thái<select value={adjustmentForm.status} onChange={e=>setAdjustmentForm(f=>({...f,status:e.target.value}))}><option value="ACTIVE">Đang áp dụng</option><option value="CANCELLED">Đã hủy</option></select></label><label className="full">Ghi chú<input value={adjustmentForm.description} onChange={e=>setAdjustmentForm(f=>({...f,description:e.target.value}))} maxLength={1000}/></label></div><div className="pa-modal-actions"><button type="button" className="pa-btn" onClick={()=>setModal(null)} disabled={saving}>Hủy</button><button type="submit" className="pa-btn primary" disabled={saving}><Save size={14}/>{saving?'Đang lưu…':'Lưu khoản'}</button></div></form>}
+      {modal==='adjustment'&&<form onSubmit={saveAdjustment}><div className="pa-form-grid"><label>Kỳ lương<select value={adjustmentForm.period_id} onChange={e=>setAdjustmentForm(f=>({...f,period_id:e.target.value,employee_id:''}))} required><option value="">-- Chọn kỳ --</option>{periods.filter(p=>p.id===periodId&&p.status!=='CLOSED').map(p=><option key={p.id} value={p.id}>{periodLabel(p)}</option>)}</select></label><label className="full">Nhân sự thuộc kỳ<select multiple value={adjustmentForm.id?[adjustmentForm.employee_id]:adjustmentForm.employee_ids} disabled={Boolean(adjustmentForm.id)} onChange={e=>setAdjustmentForm(f=>({...f,employee_ids:Array.from(e.target.selectedOptions).map(o=>o.value)}))} required size={Math.min(6,Math.max(3,eligibleEmployees.length))}>{eligibleEmployees.map(e=><option key={e.id} value={e.id}>{e.employee_code} · {e.employee_name}</option>)}</select><small>Giữ Ctrl để chọn nhiều nhân sự. Danh sách lấy từ nhân sự đã chốt của kỳ đang chọn.</small></label><label>Loại khoản<select value={adjustmentForm.kind} onChange={e=>setAdjustmentForm(f=>({...f,kind:e.target.value}))}><option value="ADD">Cộng</option><option value="DEDUCT">Trừ</option></select></label><label>Tên khoản<input value={adjustmentForm.name} onChange={e=>setAdjustmentForm(f=>({...f,name:e.target.value}))} required maxLength={160} placeholder="Nhập tên khoản"/></label><label>Dạng áp dụng<select value={adjustmentForm.application_type||'PER_PERIOD'} onChange={e=>setAdjustmentForm(f=>({...f,application_type:e.target.value}))}><option value="FIXED">Cố định</option><option value="PER_PERIOD">Theo kỳ</option></select></label><label>Số lượng<input type="number" min="0" step="any" value={adjustmentForm.quantity} onChange={e=>setAdjustmentForm(f=>({...f,quantity:e.target.value,amount:String((Number(e.target.value)||0)*(Number(f.unit_price)||0))}))} required/></label><label>Đơn vị tính<input value={adjustmentForm.unit} onChange={e=>setAdjustmentForm(f=>({...f,unit:e.target.value}))} maxLength={40} placeholder="Tháng, Ca, Ngày..."/></label><label>Đơn giá (VNĐ)<input type="number" min="0" step="any" value={adjustmentForm.unit_price} onChange={e=>setAdjustmentForm(f=>({...f,unit_price:e.target.value,amount:String((Number(f.quantity)||0)*(Number(e.target.value)||0))}))} required/></label><label>Thành tiền / Số tiền (VNĐ)<input type="number" value={String((Number(adjustmentForm.quantity)||0)*(Number(adjustmentForm.unit_price)||0))} readOnly/></label>{(adjustmentForm.application_type||'PER_PERIOD')==='FIXED'&&<><label>Áp dụng từ (YYYY-MM)<input type="month" value={adjustmentForm.effective_from||''} onChange={e=>setAdjustmentForm(f=>({...f,effective_from:e.target.value}))} required/></label><label>Áp dụng đến (không bắt buộc)<input type="month" value={adjustmentForm.effective_to||''} min={adjustmentForm.effective_from||undefined} onChange={e=>setAdjustmentForm(f=>({...f,effective_to:e.target.value}))}/></label></>}<label>Ngày ghi nhận<input type="date" value={adjustmentForm.effective_date} onChange={e=>setAdjustmentForm(f=>({...f,effective_date:e.target.value}))} required/></label><label>Trạng thái<select value={adjustmentForm.status} onChange={e=>setAdjustmentForm(f=>({...f,status:e.target.value}))}><option value="ACTIVE">Đang áp dụng</option><option value="CANCELLED">Đã hủy</option></select></label><label className="full">Ghi chú<input value={adjustmentForm.description} onChange={e=>setAdjustmentForm(f=>({...f,description:e.target.value}))} maxLength={1000}/></label></div><div className="pa-modal-actions"><button type="button" className="pa-btn" onClick={()=>setModal(null)} disabled={saving}>Hủy</button><button type="submit" className="pa-btn primary" disabled={saving}><Save size={14}/>{saving?'Đang lưu…':'Lưu khoản'}</button></div></form>}
       {modal==='advance'&&<form onSubmit={saveAdvance}><div className="pa-form-grid"><label>Nhân sự<select value={advanceForm.employee_id} onChange={e=>setAdvanceForm(f=>({...f,employee_id:e.target.value}))} required><option value="">-- Chọn nhân sự --</option>{allEmployeeOptions.map(e=><option key={e.id} value={e.id}>{e.employee_code} · {e.employee_name}</option>)}</select></label><label>Ngày tạm ứng<input type="date" value={advanceForm.advance_date} onChange={e=>setAdvanceForm(f=>({...f,advance_date:e.target.value}))} required/></label><label>Số tiền tạm ứng (VNĐ)<input type="number" min="1" step="1" value={advanceForm.amount} onChange={e=>setAdvanceForm(f=>({...f,amount:e.target.value}))} required/></label><label>Kỳ dự kiến bắt đầu thu hồi<select value={advanceForm.start_period_id} onChange={e=>setAdvanceForm(f=>({...f,start_period_id:e.target.value}))}><option value="">-- Chưa xác định --</option>{periods.filter(p=>p.type==='FIXED'&&p.status!=='CLOSED').map(p=><option key={p.id} value={p.id}>{periodLabel(p)}</option>)}</select></label><label>Trạng thái<select value={advanceForm.status} onChange={e=>setAdvanceForm(f=>({...f,status:e.target.value}))}><option value="ACTIVE">Đang theo dõi</option><option value="CANCELLED">Đã hủy</option></select></label><label className="full">Nội dung / lý do<input value={advanceForm.description} onChange={e=>setAdvanceForm(f=>({...f,description:e.target.value}))} maxLength={1000}/></label></div><p className="pa-help">Tạo hồ sơ tạm ứng không tự xác nhận đã chi tiền và không tự khấu trừ vào lương.</p><div className="pa-modal-actions"><button type="button" className="pa-btn" onClick={()=>setModal(null)} disabled={saving}>Hủy</button><button type="submit" className="pa-btn primary" disabled={saving}><Save size={14}/>{saving?'Đang lưu…':'Lưu tạm ứng'}</button></div></form>}
       {modal==='recovery'&&<form onSubmit={saveRecovery}><div className="pa-form-grid"><label>Khoản tạm ứng<select value={recoveryForm.advance_id} onChange={e=>{const a=advances.find(x=>x.id===e.target.value);setRecoveryForm(f=>({...f,advance_id:e.target.value,amount:a?String(balance(a)) : ''}))}} required><option value="">-- Chọn khoản tạm ứng --</option>{advances.filter(a=>a.status==='ACTIVE'&&balance(a)>0).map(a=><option key={a.id} value={a.id}>{a.employee_code} · {a.employee_name} · Còn {money(balance(a))}</option>)}</select></label><label>Kỳ lương thu hồi<select value={recoveryForm.period_id} onChange={e=>setRecoveryForm(f=>({...f,period_id:e.target.value}))} required><option value="">-- Chọn kỳ --</option>{periods.filter(p=>p.type==='FIXED'&&p.status!=='CLOSED').map(p=><option key={p.id} value={p.id}>{periodLabel(p)}</option>)}</select></label><label>Số tiền dự kiến thu hồi (VNĐ)<input type="number" min="1" step="1" value={recoveryForm.amount} onChange={e=>setRecoveryForm(f=>({...f,amount:e.target.value}))} required/></label><label>Ghi chú<input value={recoveryForm.notes} onChange={e=>setRecoveryForm(f=>({...f,notes:e.target.value}))} maxLength={1000}/></label></div><p className="pa-help">Chỉ tạo kế hoạch. Chưa cập nhật số tiền đã thu hồi và chưa trừ khỏi phiếu lương cho đến khi có tích hợp tính lương được kiểm thử.</p><div className="pa-modal-actions"><button type="button" className="pa-btn" onClick={()=>setModal(null)} disabled={saving}>Hủy</button><button type="submit" className="pa-btn primary" disabled={saving}><Save size={14}/>{saving?'Đang lưu…':'Lưu kế hoạch'}</button></div></form>}
     </div></div>}
