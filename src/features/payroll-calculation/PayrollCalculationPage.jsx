@@ -187,11 +187,22 @@ export default function PayrollCalculationPage({ page }) {
       for(const r of unionProfiles){ if(employeeId(r)) unionByEmployee.set(employeeId(r),r); const c=clean(r.employee_code||r.employee_code_snapshot); if(c) unionByCode.set(c,r); }
       const insuranceByCode=new Map();
       for(const r of insuranceProfiles){const c=clean(r.employee_code||r.employee_code_snapshot);if(c)insuranceByCode.set(c,r);}
+      // Keep dependent-count precedence identical to insurance-tax-data/Page.jsx.
+      // Employee Master custom_fields must be checked too; otherwise taxable income can differ by one or more dependent deductions.
+      const masterDependentCountFor=employee=>{
+        const all={...(employee||{}),...(employee?.custom_fields&&typeof employee.custom_fields==='object'?employee.custom_fields:{})};
+        for(const [key,value] of Object.entries(all)){
+          if(['dependents_count','dependent_count','người phụ thuộc','số người phụ thuộc','nguoi phu thuoc','so nguoi phu thuoc'].some(k=>norm(k)===norm(key))&&value!==null&&value!==undefined&&String(value).trim()!==''){
+            const n=num(value);if(Number.isFinite(n)&&n>=0)return Math.floor(n);
+          }
+        }
+        return null;
+      };
       const dependentCountFor=(id,code,master,snapshot)=>{
-        const fromMaster=firstDefined(master,['dependent_count','dependents_count','number_of_dependents','so_nguoi_phu_thuoc','số người phụ thuộc']);
-        const fromSnapshot=firstDefined(snapshot,['dependent_count','dependents_count','number_of_dependents','so_nguoi_phu_thuoc','số người phụ thuộc']);
+        const fromMaster=masterDependentCountFor(master);
+        const fromSnapshot=masterDependentCountFor(snapshot);
         const explicit=firstDefined(taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{},['dependent_count']);
-        if(fromMaster!==undefined)return Math.max(0,num(fromMaster));if(fromSnapshot!==undefined)return Math.max(0,num(fromSnapshot));if(explicit!==undefined)return Math.max(0,num(explicit));
+        if(fromMaster!==null)return fromMaster;if(fromSnapshot!==null)return fromSnapshot;if(explicit!==undefined)return Math.max(0,num(explicit));
         return dependents.filter(d=>(employeeId(d)===id||clean(d.employee_code||d.employee_code_snapshot)===code)&&d.is_active!==false&&!['INACTIVE','CANCELLED','NGỪNG GIẢM TRỪ','NGUNG GIAM TRU'].includes(norm(d.status).toUpperCase())).length;
       };
       const defaultTaxConfig=taxConfigs.find(c=>clean(c.config_key)==='default')||taxConfigs[0]||{};
