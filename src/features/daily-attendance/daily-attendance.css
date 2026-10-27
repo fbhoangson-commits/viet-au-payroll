@@ -18,7 +18,7 @@
 .daily-attendance-page .btn:focus-visible,.daily-attendance-page input:focus-visible,.daily-attendance-page select:focus-visible{outline:2px solid rgba(17,124,131,.35);outline-offset:1px}
 .daily-attendance-page .btn:disabled{opacity:.48;cursor:not-allowed;box-shadow:none}
 .daily-attendance-page .da-toolbar,.daily-attendance-page .da-config-panel,.daily-attendance-page .da-codes-panel,.daily-attendance-page .da-table-panel{box-shadow:0 2px 8px rgba(23,53,75,.025)}
-.daily-attendance-page .da-code-form{grid-template-columns:90px minmax(150px,1.2fr) minmax(130px,.75fr) minmax(150px,.8fr) auto auto;gap:10px}
+.daily-attendance-page .da-code-form{grid-template-columns:90px minmax(180px,1.2fr) minmax(130px,.75fr) 52px auto auto auto;gap:10px;align-items:end}.daily-attendance-page .da-code-form>.btn{align-self:end;min-height:36px;white-space:nowrap}
 .daily-attendance-page .da-color-input{display:flex;align-items:center;gap:7px;min-width:0}
 .daily-attendance-page .da-color-input input[type=color],.daily-attendance-page .da-code-style-control input[type=color]{width:32px;height:32px;min-width:32px;padding:3px;border:1px solid #d7e1e9;border-radius:7px;background:#fff;cursor:pointer}
 .daily-attendance-page .da-color-input input[type=text],.daily-attendance-page .da-code-style-control input[type=text]{min-width:0;width:90px;padding:8px;border:1px solid #d7e1e9;border-radius:7px;background:#fff;color:#435c70;font:inherit;font-size:10px;text-transform:uppercase}

@@ -1,4 +1,4 @@
-# WEBAPP LƯƠNG VIỆT ÂU — CHẤM CÔNG NGÀY V5
+# WEBAPP LƯƠNG VIỆT ÂU — CHẤM CÔNG NGÀY V6
 
 ## Phạm vi
 Bản vá chỉ thay đổi:
@@ -10,13 +10,13 @@ Không có migration mới vì bản này không thay đổi schema/database.
 ## Sửa lỗi đồng bộ và số lượt chấm công
 Supabase/PostgREST thường giới hạn một phản hồi truy vấn ở 1.000 dòng. V4 tải dữ liệu chấm công bằng một truy vấn duy nhất, khiến giao diện chỉ biết tối đa 1.000 dòng; số liệu và tập ô cần đồng bộ vì vậy không phản ánh đầy đủ dữ liệu kỳ.
 
-V5 thêm `fetchAllRows()` để đọc tuần tự theo trang 500 dòng cho dữ liệu chấm công của kỳ. Sau khi tải đủ dữ liệu:
+V6 thêm `fetchAllRows()` để đọc tuần tự theo trang 500 dòng cho dữ liệu chấm công của kỳ. Sau khi tải đủ dữ liệu:
 - Bộ đếm lượt đã lưu phản ánh toàn bộ dòng được đọc.
 - Bản đồ ô đã chấm công biết các ô đã tồn tại trên toàn kỳ.
 - Đồng bộ tiếp tục chia thành batch ghi 400 ô, tự chạy hết các batch.
 - Các ô đã có dữ liệu được giữ nguyên; không dựa vào bộ lọc đang hiển thị.
 
-Nếu nút vẫn báo lỗi sau khi deploy V5, cần lấy chính xác thông báo lỗi trong banner để xác định tiếp nguyên nhân backend/RLS/constraint; không thể kết luận chỉ từ ảnh giao diện.
+Nếu nút vẫn báo lỗi sau khi deploy V6, cần lấy chính xác thông báo lỗi trong banner để xác định tiếp nguyên nhân backend/RLS/constraint; không thể kết luận chỉ từ ảnh giao diện.
 
 ## Cải thiện thẻ mã công
 - Bỏ trường nhập mã HEX khỏi form và từng thẻ mã công.
@@ -37,3 +37,8 @@ Nếu nút vẫn báo lỗi sau khi deploy V5, cần lấy chính xác thông b�
 - JSX được TypeScript transpile để kiểm tra cú pháp: 0 diagnostics.
 - ZIP được tạo và kiểm tra tính toàn vẹn.
 - Chưa chạy build toàn ứng dụng, chưa kết nối Supabase production và chưa kiểm thử ghi dữ liệu thật.
+
+
+## Bản vá V6 — căn nút Thêm mã
+- Chỉ chỉnh CSS lưới của form thêm mã công để nút **Thêm mã** nằm cùng hàng với các trường trên màn hình desktop.
+- Giữ nguyên cách xếp responsive trên màn hình hẹp; không thay đổi nghiệp vụ hoặc dữ liệu.
