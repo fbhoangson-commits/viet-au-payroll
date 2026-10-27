@@ -31,10 +31,10 @@ const MENU = {
   'personal-income-tax': { title:'Thuế TNCN', description:'Tổng hợp căn cứ và kết quả thuế từ dữ liệu thuế đã cấu hình cho kỳ.', icon:Calculator },
   'payroll-summary': { title:'Tổng Hợp Lương', description:'Bảng tổng hợp kết quả lương theo từng nhân sự trong kỳ.', icon:FileSpreadsheet },
 };
-const moneyColumns = new Set(['fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','tax','gross','net','employerInsurance']);
+const moneyColumns = new Set(['fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','tax','taxAmount','gross','net','employerInsurance']);
 const colLabel = {
  code:'Mã Nhân Viên', name:'Họ và Tên', classification:'Phân loại', department:'Bộ phận', position:'Chức danh',
- fixed:'Lương Cố Định', teaching:'Tiết Dạy & Phụ Đạo', additions:'Khoản Cộng', deductions:'Khoản Trừ',
+ fixed:'Lương Cố Định', teaching:'Thành Tiền Tiết Dạy', additions:'Khoản Cộng', deductions:'Khoản Trừ',
  insuranceEmployee:'BHXH NLĐ', unionEmployee:'Phí Công Đoàn NLĐ', employerInsurance:'BHXH đơn vị',
  tax:'Thuế TNCN', gross:'Tổng Thu Nhập', net:'Thực Lĩnh', status:'Trạng Thái Dữ Liệu',
  lessonCount:'Tổng Số Tiết', rateCount:'Số Cấu Phần Có Đơn Giá', taxable:'Thu Nhập Tính Thuế',
@@ -66,6 +66,31 @@ function estimateTax(row) {
 function rowPeriodId(r) { return clean(r?.period_id); }
 function employeeId(r) { return clean(r?.employee_id); }
 function isActiveAdjustment(r) { return !['CANCELLED','CANCELED','INACTIVE','ĐÃ HỦY','DA HUY'].includes(String(r?.status||'').toUpperCase()); }
+function firstText(...values) { return values.find(v => v !== null && v !== undefined && String(v).trim() !== '') ?? ''; }
+function fieldFromObject(obj, candidates) {
+  if (!obj || typeof obj !== 'object') return '';
+  const wanted = new Set(candidates.map(norm));
+  for (const [key,value] of Object.entries(obj)) if (wanted.has(norm(key)) && value !== null && value !== undefined && String(value).trim() !== '') return value;
+  return '';
+}
+function classificationOf(...objects) {
+  const candidates = ['Phân loại','phan loai','employment_type','employee_type','employee_classification','classification','loai nhan su','loại nhân sự','contract_type','nhom nhan su'];
+  for (const obj of objects) {
+    const direct = fieldFromObject(obj,candidates); if (direct) return clean(direct);
+    const nested = fieldFromObject(obj?.custom_fields,candidates) || fieldFromObject(obj?.metadata,candidates); if (nested) return clean(nested);
+  }
+  return '';
+}
+function taxMethodFor(classification) { return norm(classification).includes('co huu') ? 'Lũy tiến từng phần' : classification ? 'Khấu trừ 10% (cần đối chiếu điều kiện)' : 'Chưa xác định phân loại'; }
+function statusForPage(row,page) {
+  if (page === 'period-employees') return !row.classification ? 'Chưa cập nhật phân loại' : !row.hasTaxData ? 'Thiếu dữ liệu BHXH/thuế kỳ' : 'Đã liên kết nhân sự';
+  if (page === 'fixed-salary') return !row.hasRateData ? 'Chưa có định mức' : row.fixedComponentCount < 4 ? `Có ${row.fixedComponentCount}/4 cấu phần; cần kiểm tra` : 'Đủ 4 cấu phần lương';
+  if (page === 'teaching-pay') return row.teachingStatus;
+  if (page === 'payroll-deductions') return row.adjustmentCount ? 'Đã đọc khoản cộng/trừ' : 'Chưa phát sinh khoản cộng/trừ';
+  if (page === 'insurance-union') return !row.hasTaxData && !row.hasInsuranceProfile && !row.hasUnionProfile ? 'Chưa có dữ liệu bảo hiểm/Công đoàn' : 'Đã đọc dữ liệu bảo hiểm/Công đoàn';
+  if (page === 'personal-income-tax') return !row.classification ? 'Chưa cập nhật phân loại' : row.taxable > 0 || row.taxAmount > 0 ? 'Đã có căn cứ tính thuế' : 'Chưa có căn cứ tính thuế';
+  return row.status;
+}
 
 export default function PayrollCalculationPage({ page }) {
   const meta = MENU[page] || MENU['payroll-overview'];
@@ -96,7 +121,7 @@ export default function PayrollCalculationPage({ page }) {
       const selectedId=(keepPeriod && periodId && fixedPeriods.some(p=>p.id===periodId)) ? periodId : (fixedPeriods[0]?.id || '');
       setPeriodId(selectedId);
       if(!selectedId){setRows([]);setWarnings(['Chưa có Kỳ Lương tháng (FIXED). Hãy tạo Kỳ Lương trong menu Quản lý Kỳ Lương.']);setDataLoaded(true);return;}
-      const [snapshotA,snapshotB,employees,groups,columns,rateValues,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords] = await Promise.all([
+      const [snapshotA,snapshotB,employees,groups,columns,rateValues,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles] = await Promise.all([
         fetchRows('payroll_period_employees','Danh sách nhân sự kỳ',notes),
         fetchRows('payroll_period_employee_snapshots','Snapshot nhân sự kỳ',notes),
         fetchRows('employees','Employee Master',notes,true),
@@ -110,6 +135,7 @@ export default function PayrollCalculationPage({ page }) {
         fetchRows('employee_tax_dependents','Người phụ thuộc',notes),
         fetchRows('employee_support_allowances','Hỗ trợ nhân sự',notes),
         fetchRows('daily_attendance_records','Chấm công ngày',notes),
+        fetchRows('employee_union_profiles','Hồ sơ Công đoàn',notes),
       ]);
       const snapshotsRaw=snapshotA.filter(r=>rowPeriodId(r)===selectedId);
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
@@ -122,57 +148,74 @@ export default function PayrollCalculationPage({ page }) {
         valuesByEmployee.get(key).push(r);
       }
       const selectedRateColumns=columns.filter(c=>c.is_active!==false);
+      const rateGroupName = c => norm(groupsById.get(clean(c.group_id))?.name || groupsById.get(clean(c.group_id))?.code || '');
+      const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n === 'khac' || n.includes('teaching') || n.includes('tutoring'); };
+      const fixedColumns = selectedRateColumns.filter(c=>!isTeachingColumn(c)).slice(0,4);
+      const teachingColumns = selectedRateColumns.filter(isTeachingColumn);
+      const dynamicLabels = Object.fromEntries([...fixedColumns.map(c=>[`fixedCol_${c.id}`,clean(c.name||c.label||c.code||'Cấu phần lương')]),...teachingColumns.map(c=>[`lesson_${c.id}`,`${clean(c.name||c.label||c.code||'Cột tiết')} · Số tiết`])]);
       const periodTeaching=teachingRecords.filter(r=>rowPeriodId(r)===selectedId);
       const periodAdjustments=adjustments.filter(r=>rowPeriodId(r)===selectedId && isActiveAdjustment(r));
       const periodTax=taxRows.filter(r=>rowPeriodId(r)===selectedId);
       const taxByEmployee=new Map(periodTax.map(r=>[employeeId(r),r]));
       const insuranceByEmployee=new Map();
       for(const r of insuranceProfiles) insuranceByEmployee.set(employeeId(r),r);
+      const unionByEmployee=new Map();
+      for(const r of unionProfiles) unionByEmployee.set(employeeId(r),r);
       const supportFor=(id,code)=>supportRows.filter(r=>(employeeId(r)===id || clean(r.employee_code)===code) && (!r.period_id || rowPeriodId(r)===selectedId) && !['CANCELLED','INACTIVE'].includes(String(r.status||'').toUpperCase())).reduce((s,r)=>s+num(r.amount||r.support_amount),0);
       const depCountFor=(id,code)=>dependents.filter(r=>(employeeId(r)===id || clean(r.employee_code)===code) && r.is_active!==false && !['INACTIVE','CANCELLED'].includes(String(r.status||'').toUpperCase())).length;
       const output=snapshots.map(s=>{
         const id=employeeId(s), code=clean(s.employee_code||s.employee_code_snapshot), master=masterById.get(id)||{};
         const rateRows=valuesByEmployee.get(id)||[];
         let fixed=0,rateCount=0;
+        const fixedParts=Object.fromEntries(fixedColumns.map(c=>[`fixedCol_${c.id}`,0]));
         for(const rv of rateRows){
           const group=groupsById.get(clean(rv.group_id));
           const groupName=norm(group?.name||group?.code||'');
           if(groupName.includes('tiet day')||groupName.includes('phu dao')||groupName==='khac'||groupName.includes('teaching')||groupName.includes('tutoring')) continue;
           const vals=rv.values && typeof rv.values==='object' ? rv.values : {};
-          for(const c of selectedRateColumns.filter(c=>clean(c.group_id)===clean(rv.group_id))){
-            if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixed+=num(vals[c.id]);rateCount++;}
+          for(const c of fixedColumns.filter(c=>clean(c.group_id)===clean(rv.group_id))){
+            if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
         const lessons=periodTeaching.filter(r=>employeeId(r)===id);
         let teaching=0, lessonCount=0, missingRates=0;
+        const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
           const col=columnsById.get(clean(rec.salary_rate_column_id));
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
+          if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
           const rv=rateRows.find(v=>clean(v.group_id)===clean(col.group_id));
           const rate=rv?.values?.[col.id];
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
         const employeeAdjustments=periodAdjustments.filter(r=>employeeId(r)===id || clean(r.employee_code)===code);
-        const additions=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='ADD').reduce((sum,r)=>sum+num(r.amount),0);
-        const deductions=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT').reduce((sum,r)=>sum+num(r.amount),0);
+        const addRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='ADD');
+        const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
+        const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
+        const deductions=deductRows.reduce((sum,r)=>sum+num(r.amount),0);
         const tax=taxByEmployee.get(id)||{};
         const insurance=insuranceByEmployee.get(id)||{};
         const insuranceEmployee=num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? (num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*((num(tax.employee_social_rate ?? insurance.employee_social_rate)+num(tax.employee_health_rate ?? insurance.employee_health_rate)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate))/100)));
         const employerInsurance=num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
-        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? 0);
+        const union=unionByEmployee.get(id)||{};
+        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? 0);
         const taxable=num(tax.taxable_income_override!=='' && tax.taxable_income_override!==null && tax.taxable_income_override!==undefined ? tax.taxable_income_override : tax.calculated_taxable_income ?? tax.taxable_income ?? 0);
-        const taxAmount=estimateTax(tax);
+        const classification=classificationOf(tax,master,s);
+        const taxAmount=estimateTax({...tax,employee_type:firstText(tax.employee_type,tax.employee_classification,classification)});
         const gross=fixed+teaching+additions;
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
-        const classification=clean(tax.employee_type||tax.employee_classification||master.employment_type||master.employee_classification||master.employee_group||s.employee_type||'');
         const status=[];
-        if(!rateRows.length) status.push('Chưa có định mức');
-        if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có dòng tiết dạy chưa khớp cấu hình');
+        if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
+        if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
         if(!taxByEmployee.has(id)) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
-        return {id,code,name:nameOf(s)||nameOf(master),classification,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,teaching,lessonCount,rateCount,additions,deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??depCountFor(id,code),support:supportFor(id,code),status:status.length?status.join('; '):'Đã đọc dữ liệu nguồn',hasIssue:status.length>0};
+        if(!classification) status.push('Chưa cập nhật phân loại');
+        const fixedComponentCount=rateCount;
+        const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
+        const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
+        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData:taxByEmployee.has(id),hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??depCountFor(id,code),support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
       }).sort((a,b)=>a.code.localeCompare(b.code,'vi',{numeric:true}));
       setRows(output);setWarnings(notes);setDataLoaded(true);
     } catch(e) {setError(errorText(e));setRows([]);setWarnings(notes);setDataLoaded(false);}
@@ -189,24 +232,26 @@ export default function PayrollCalculationPage({ page }) {
     return matches&&typeMatches;
   }),[rows,search,typeFilter]);
   const totals=useMemo(()=>rows.reduce((s,r)=>{
-    for(const key of ['fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','employerInsurance','taxAmount','gross','net'])s[key]+=num(r[key]);
-    s.lessonCount+=num(r.lessonCount);if(r.hasIssue)s.issues++;
+    for(const key of ['fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','employerInsurance','taxable','taxAmount','gross','net'])s[key]+=num(r[key]);
+    s.lessonCount+=num(r.lessonCount); for(const k of Object.keys(r)) if(k.startsWith('fixedCol_')) s[k]=(s[k]||0)+num(r[k]); if(r.hasIssue)s.issues++;
     return s;
-  },{fixed:0,teaching:0,additions:0,deductions:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
+  },{fixed:0,teaching:0,additions:0,deductions:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxable:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
 
   const columns = useMemo(()=>{
     if(page==='period-employees')return ['code','name','classification','department','position','status'];
-    if(page==='fixed-salary')return ['code','name','classification','fixed','rateCount','status'];
-    if(page==='teaching-pay')return ['code','name','lessonCount','teaching','status'];
-    if(page==='payroll-deductions')return ['code','name','additions','deductions','status'];
-    if(page==='insurance-union')return ['code','name','participates','insuranceEmployee','unionEmployee','employerInsurance','status'];
-    if(page==='personal-income-tax')return ['code','name','classification','taxable','taxAmount','taxStatus'];
-    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxAmount','gross','net'];
+    if(page==='fixed-salary')return ['code','name','classification',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('fixedCol_')).slice(0,4),'fixed','fixedComponentCount','status'];
+    if(page==='teaching-pay')return ['code','name',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('lesson_')),'lessonCount','teachingStatus','teaching'];
+    if(page==='payroll-deductions')return ['code','name','additionCount','additions','deductionCount','deductions','difference','status'];
+    if(page==='insurance-union')return ['code','name','participates','insuranceEmployee','unionEmployee','status'];
+    if(page==='personal-income-tax')return ['code','name','classification','taxMethod','taxable','taxAmount','taxStatus'];
+    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxAmount','gross','net','status'];
     return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxAmount','gross','net','status'];
-  },[page]);
+  },[page,rows]);
+  const dynamicLabels = rows[0]?.columnLabels || {};
+  const columnLabel = k => colLabel[k] || dynamicLabels[k] || k;
   const exportRows=()=> {
-    const data=visible.map(r=>Object.fromEntries(columns.map(k=>[colLabel[k]||k,k==='participates'?(r[k]?'Có':'Không'):(moneyColumns.has(k)?num(r[k]):k==='taxable'?num(r[k]):(r[k]??''))])));
-    const ws=XLSX.utils.json_to_sheet(data.length?data:[Object.fromEntries(columns.map(k=>[colLabel[k]||k,'']))]);
+    const data=visible.map(r=>Object.fromEntries(columns.map(k=>[columnLabel(k),k==='participates'?(r[k]?'Có':'Không'):(moneyColumns.has(k)?num(r[k]):k==='taxable'||k==='lessonCount'||k==='rateCount'||k==='fixedComponentCount'||k==='additionCount'||k==='deductionCount'?num(r[k]):(r[k]??''))])));
+    const ws=XLSX.utils.json_to_sheet(data.length?data:[Object.fromEntries(columns.map(k=>[columnLabel(k),'']))]);
     const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Tính lương');
     XLSX.writeFile(wb,`${page}-${periodTitle(periods.find(p=>p.id===periodId)).replace(/[^\wÀ-ỹ-]+/g,'-')}.xlsx`);
   };
@@ -230,7 +275,7 @@ export default function PayrollCalculationPage({ page }) {
       {metric('Tổng thu nhập',money(totals.gross),Wallet)}
       {metric('Tổng khấu trừ NLĐ',money(totals.insuranceEmployee+totals.unionEmployee+totals.taxAmount+totals.deductions),ShieldCheck)}
       {metric('Tổng thực lĩnh',money(totals.net),CircleDollarSign)}
-      {metric('Phần BHXH đơn vị',money(totals.employerInsurance),Calculator)}
+      {metric('Phí Công đoàn NLĐ',money(totals.unionEmployee),Calculator)}
       <div className="pc-period-status"><span>TRẠNG THÁI KỲ</span><strong>{selectedPeriod?statusTitle(selectedPeriod.status):'Chưa chọn kỳ'}</strong><small>{selectedPeriod?periodTitle(selectedPeriod):'Tạo kỳ trong menu Quản lý Kỳ Lương'}</small></div>
     </div>}
     {page==='payroll-summary'&&<div className="pc-metrics pc-summary-metrics">
@@ -241,8 +286,8 @@ export default function PayrollCalculationPage({ page }) {
       {loading||refreshing&&!dataLoaded ? <div className="pc-empty"><RefreshCw className="pc-spin" size={22}/><strong>Đang tải dữ liệu kỳ lương...</strong></div>
       : !selectedPeriod ? <div className="pc-empty"><CalendarRangeIcon/><strong>Chưa có Kỳ Lương tháng</strong><p>Tạo Kỳ Lương tại menu Dữ Liệu Kỳ Lương → Quản lý Kỳ Lương.</p></div>
       : !visible.length ? <div className="pc-empty"><Users size={26}/><strong>{rows.length?'Không tìm thấy nhân sự phù hợp':'Kỳ Lương chưa có danh sách nhân sự được chốt'}</strong><p>{rows.length?'Thử thay đổi từ khóa hoặc bộ lọc.':'Kiểm tra danh sách nhân sự của Kỳ Lương. Không có dữ liệu mẫu được tạo tự động.'}</p></div>
-      : <div className="pc-table-wrap"><table className="pc-table"><thead><tr>{columns.map(k=><th key={k}>{colLabel[k]||k}</th>)}</tr></thead><tbody>{visible.map(r=><tr key={r.id||r.code}>{columns.map(k=><td key={k} className={moneyColumns.has(k)||k==='taxable'||k==='lessonCount'||k==='rateCount'?'pc-number':''}>{k==='status'?<span className={`pc-status ${r.hasIssue?'pc-status-warn':'pc-status-ok'}`}>{r.status}</span>:k==='taxStatus'?<span className={`pc-status ${r.taxAmount||r.taxable?'pc-status-ok':'pc-status-warn'}`}>{r.tax?.taxable_income_override!=null?'Có điều chỉnh':r.tax?.calculated_taxable_income!=null?'Đã tính':'Chưa có kết quả thuế'}</span>:k==='participates'?(r.participates?'Có':'Không'):k==='taxable'?money(r.taxable):moneyColumns.has(k)?money(r[k]):k==='lessonCount'||k==='rateCount'?num(r[k]).toLocaleString('vi-VN'):r[k]||'—'}</td>)}</tr>)}</tbody>
-      {page!=='period-employees'&&<tfoot><tr><th colSpan={Math.max(2,columns.length-2)}>TỔNG CỘNG</th>{columns.slice(-2).map(k=><th key={k} className="pc-number">{moneyColumns.has(k)?money(totals[k]||0):'—'}</th>)}</tr></tfoot>}</table></div>}
+      : <div className="pc-table-wrap"><table className="pc-table"><thead><tr>{columns.map(k=><th key={k}>{columnLabel(k)}</th>)}</tr></thead><tbody>{visible.map(r=><tr key={r.id||r.code}>{columns.map(k=><td key={k} className={moneyColumns.has(k)||k.startsWith('fixedCol_')||k==='taxable'||k==='lessonCount'||k==='rateCount'||k==='fixedComponentCount'||k==='additionCount'||k==='deductionCount'||k.startsWith('lesson_')?'pc-number':''}>{k==='status'||k==='teachingStatus'?<span className={`pc-status ${(k==='teachingStatus' ? r.teachingStatus==='Đã ghi nhận tiết dạy' : ['Đã liên kết nhân sự','Đã đọc khoản cộng/trừ','Đã đọc dữ liệu bảo hiểm/Công đoàn','Đủ 4 cấu phần lương','Đủ dữ liệu nguồn'].includes(statusForPage(r,page)) || statusForPage(r,page).startsWith('Chưa phát sinh'))?'pc-status-ok':'pc-status-warn'}`}>{k==='status'?statusForPage(r,page):r[k]}</span>:k==='taxStatus'?<span className={`pc-status ${r.taxAmount||r.taxable?'pc-status-ok':'pc-status-warn'}`}>{r.tax?.taxable_income_override!=null?'Có điều chỉnh':r.tax?.calculated_taxable_income!=null||r.tax?.taxable_income!=null?'Đã có căn cứ thuế':'Chưa có căn cứ thuế'}</span>:k==='participates'?(r.participates?'Có':'Không'):k==='taxable'?money(r.taxable):moneyColumns.has(k)||k.startsWith('fixedCol_')?money(r[k]):k==='lessonCount'||k==='rateCount'||k==='fixedComponentCount'||k==='additionCount'||k==='deductionCount'||k.startsWith('lesson_')?num(r[k]).toLocaleString('vi-VN'):r[k]||'—'}</td>)}</tr>)}</tbody>
+      {page!=='period-employees'&&<tfoot><tr>{columns.map((k,i)=><th key={k} className={i>1?'pc-number':''}>{i===0?'TỔNG CỘNG':moneyColumns.has(k)||k.startsWith('fixedCol_')||k==='taxable'?money(totals[k]||0):k==='lessonCount'?num(totals.lessonCount).toLocaleString('vi-VN'):''}</th>)}</tr></tfoot>}</table></div>}
     </div>
     <div className="pc-footnote"><AlertTriangle size={14}/><span>Đây là màn hình tổng hợp chỉ đọc. Số liệu lấy từ các bảng dữ liệu hiện có; các cấu phần chưa có nguồn hoặc chưa đủ điều kiện tính sẽ được cảnh báo. Chưa thực hiện duyệt hoặc khóa kỳ.</span></div>
   </section>;
