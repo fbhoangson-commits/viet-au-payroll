@@ -111,10 +111,15 @@ export default function Page() {
     const map = new Map();
     // Prefer the selected policy, but fall back to the employee/group's saved rates
     // when the period has no policy link or the saved row uses another policy ID.
+    // Merge columns across duplicate policy rows. A later row must not erase
+    // the other columns for the same employee/group; selected policy wins per key.
     for (const row of rateValues) {
       const key = `${row.employee_id}|${row.group_id}`;
-      const existing = map.get(key);
-      if (!existing || row.policy_version_id === policyId) map.set(key, row.values || {});
+      const existing = map.get(key) || {};
+      const incoming = row.values && typeof row.values === 'object' ? row.values : {};
+      const merged = { ...incoming, ...existing };
+      if (row.policy_version_id === policyId) Object.assign(merged, incoming);
+      map.set(key, merged);
     }
     return map;
   }, [rateValues, policyId]);
