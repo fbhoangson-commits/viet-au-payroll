@@ -166,6 +166,46 @@ export default function Page() {
     if (selected?.id === period.id) setSelected({ ...period, status: nextStatus });
   };
 
+  const deletePeriod = async period => {
+    if (!supabase || saving) return;
+    const label = period.code || period.name || 'kỳ lương này';
+    if (!window.confirm(`XÓA KỲ ${label}?\n\nThao tác này không thể hoàn tác. Hệ thống sẽ chỉ xóa kỳ nếu chưa có dữ liệu nghiệp vụ liên kết; nếu đã phát sinh dữ liệu, thao tác sẽ bị chặn để bảo vệ lịch sử chấm công và tính lương.`)) return;
+    setSaving(true); setError(''); setMessage('');
+    try {
+      // Refuse hard-delete when any known period-scoped business data exists.
+      // Never cascade-delete attendance, payroll, insurance/tax or historical records.
+      const dependencies = [
+        ['payroll_period_employees', 'Nhân sự kỳ'],
+        ['payroll_period_employee_snapshots', 'Snapshot nhân sự'],
+        ['teaching_attendance_records', 'Chấm Công Tiết Dạy'],
+        ['daily_attendance_records', 'Chấm công ngày'],
+        ['payroll_period_insurance_tax_data', 'Dữ liệu BHXH/thuế'],
+        ['payroll_adjustments', 'Khoản cộng/trừ'],
+        [COLUMN_TABLE, 'Cột dữ liệu kỳ phát sinh'],
+        [VALUE_TABLE, 'Dữ liệu kỳ phát sinh'],
+      ];
+      const linked = [];
+      for (const [table, title] of dependencies) {
+        const { count, error: checkError } = await supabase.from(table).select('id', { count: 'exact', head: true }).eq('period_id', period.id);
+        if (checkError) throw new Error(`Không thể kiểm tra dữ liệu liên kết ở bảng ${table}: ${checkError.message}. Để an toàn, kỳ chưa bị xóa.`);
+        if ((count || 0) > 0) linked.push(`${title}: ${count}`);
+      }
+      if (linked.length) {
+        setError(`Không thể xóa kỳ ${label} vì đã có dữ liệu liên kết (${linked.join('; ')}). Hãy giữ kỳ để bảo toàn dữ liệu lịch sử.`);
+        return;
+      }
+      const { error: deleteError } = await supabase.from(TABLE).delete().eq('id', period.id);
+      if (deleteError) throw deleteError;
+      if (selected?.id === period.id) setSelected(null);
+      setMessage(`Đã xóa kỳ ${label}.`);
+      await load(false);
+    } catch (e) {
+      setError(`Không xóa được kỳ ${label}: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveColumn = async event => {
     event.preventDefault(); if (!supabase || !selected || selected.type !== 'EVENT') return;
     const label = columnForm.label.trim(); if (!label) { setError('Vui lòng nhập tên cột.'); return; }
@@ -285,9 +325,9 @@ export default function Page() {
       <div className="pp-table-wrap"><table className="pp-table"><thead><tr><th>Mã kỳ</th><th>Tên kỳ</th><th>{tab === 'FIXED' ? 'Tháng lương' : 'Thời gian'}</th><th>Nhân sự</th><th>Trạng thái</th><th>Mô tả</th><th>Thao tác</th></tr></thead><tbody>
         {loading ? <tr><td colSpan="7" className="pp-empty">Đang tải dữ liệu từ Supabase…</td></tr> : visiblePeriods.length ? visiblePeriods.map(period => <tr key={period.id} className={selected?.id === period.id ? 'selected' : ''}>
           <td><strong>{period.code}</strong></td><td><span className="pp-period-name">{period.name}</span></td><td>{tab === 'FIXED' ? monthLabel(period.month) : `${dateLabel(period.start_date)} – ${dateLabel(period.end_date)}`}</td><td>{period.type === 'FIXED' ? <span className="pp-count"><Users size={13}/>{period.employee_count ?? '—'}</span> : <span className="pp-count"><Users size={13}/>{values.length && selected?.id === period.id ? values.length : '—'}</span>}</td>
-          <td><span className={`pp-status ${statusClass[period.status] || 'draft'}`}>{statusLabel[period.status] || period.status || 'Bản nháp'}</span></td><td className="pp-description">{period.description || '—'}</td><td><div className="pp-row-actions"><button className="pp-icon-button" title="Xem chi tiết" onClick={() => loadDetails(period)}><Eye size={15}/></button><button className="pp-icon-button" title="Sửa thông tin" onClick={() => openEdit(period)}><Edit3 size={15}/></button>{period.status !== 'CLOSED' ? <button className="pp-button small secondary" onClick={() => changeStatus(period, 'CLOSED')}>Đóng kỳ</button> : <button className="pp-button small secondary" onClick={() => changeStatus(period, 'OPEN')}>Mở kỳ</button>}</div></td>
+          <td><span className={`pp-status ${statusClass[period.status] || 'draft'}`}>{statusLabel[period.status] || period.status || 'Bản nháp'}</span></td><td className="pp-description">{period.description || '—'}</td><td><div className="pp-row-actions"><button className="pp-icon-button" title="Xem chi tiết" onClick={() => loadDetails(period)}><Eye size={15}/></button><button className="pp-icon-button" title="Sửa thông tin" onClick={() => openEdit(period)}><Edit3 size={15}/></button>{period.status !== 'CLOSED' ? <button className="pp-button small secondary" onClick={() => changeStatus(period, 'CLOSED')}>Đóng kỳ</button> : <button className="pp-button small secondary" onClick={() => changeStatus(period, 'OPEN')}>Mở kỳ</button>}<button className="pp-button small secondary" title="Xóa kỳ lương" onClick={() => deletePeriod(period)} disabled={saving}><Trash2 size={13}/> Xóa</button></div></td>
         </tr>) : <tr><td colSpan="7" className="pp-empty">{error ? 'Không thể hiển thị dữ liệu khi kết nối chưa sẵn sàng.' : 'Chưa có kỳ phù hợp. Bấm “Tạo Kỳ” để bắt đầu.'}</td></tr>}
-      </tbody></table></div><p className="pp-footnote">Không có thao tác xóa cứng kỳ lương. Đóng kỳ chỉ thay đổi trạng thái quản lý; dữ liệu kỳ và liên kết lịch sử được giữ nguyên.</p>
+      </tbody></table></div><p className="pp-footnote">Xóa kỳ chỉ khả dụng khi chưa có dữ liệu nghiệp vụ liên kết. Kỳ đã phát sinh chấm công hoặc dữ liệu lương sẽ được bảo vệ để giữ nguyên lịch sử.</p>
     </section>
 
     {selected && <section className="pp-card pp-detail"><div className="pp-card-heading"><div><div className="pp-detail-eyebrow">CHI TIẾT KỲ</div><h3>{selected.code} · {selected.name}</h3><p>{selected.type === 'FIXED' ? 'Danh sách nhân sự được chốt tại thời điểm tạo kỳ. Chưa tự động sao chép dữ liệu chấm công hoặc tính lương.' : 'Dữ liệu phát sinh và cấu hình cột được lưu riêng cho kỳ này.'}</p></div><button className="pp-icon-button" onClick={() => setSelected(null)} aria-label="Đóng chi tiết"><X size={16}/></button></div>

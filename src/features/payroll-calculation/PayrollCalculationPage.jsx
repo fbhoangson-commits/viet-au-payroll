@@ -42,13 +42,22 @@ const colLabel = {
  participates:'Tham Gia BHXH', taxStatus:'Trạng Thái Thuế', taxMethod:'Phương Pháp Tính Thuế'
 };
 async function fetchRows(table, label, warnings, required=false) {
-  const { data, error } = await supabase.from(table).select('*');
-  if (error) {
-    if (required) throw new Error(`${label}: ${errorText(error)}`);
-    warnings.push(`${label}: chưa đọc được (${errorText(error)})`);
-    return [];
+  // Supabase/PostgREST commonly caps a response at 1,000 rows. Fetch in pages so
+  // later records (including OTHER / Coi Thi / IELTS / Trợ Giảng) are not silently omitted.
+  const all = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from(table).select('*').range(from, from + pageSize - 1);
+    if (error) {
+      if (required) throw new Error(`${label}: ${errorText(error)}`);
+      warnings.push(`${label}: chưa đọc được (${errorText(error)})`);
+      return [];
+    }
+    const batch = data || [];
+    all.push(...batch);
+    if (batch.length < pageSize) break;
   }
-  return data || [];
+  return all;
 }
 function tax5(value) {
   const x=Math.max(0,num(value));
@@ -223,19 +232,11 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>
-          (employeeId(r) && employeeId(r)===id) ||
-          (code && [r.employee_code, r.employee_code_snapshot, r.code].some(v => clean(v).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi')))
-        );
+        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
-          // Resolve the saved column reference defensively. Some historical attendance
-          // rows may retain a column code/name rather than the current UUID.
-          const rawColumnRef = clean(rec.salary_rate_column_id || rec.salary_rate_column_code || rec.salary_rate_column_name || rec.column_code || rec.column_name);
-          const col = columnsById.get(rawColumnRef) || columns.find(c =>
-            [c.id, c.code, c.name, c.label].some(v => clean(v) && norm(v) === norm(rawColumnRef))
-          );
+          const col=columnsById.get(clean(rec.salary_rate_column_id));
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
@@ -248,32 +249,23 @@ export default function PayrollCalculationPage({ page }) {
             (recordEmployeeId && employeeId(v)===recordEmployeeId) ||
             (recordEmployeeCode && codeOf(v).toLocaleUpperCase('vi')===recordEmployeeCode)
           );
-          // Resolve each attendance row against the exact employee + OTHER/teaching group + column.
-          // JSONB salary_rate_values stores dynamic column UUIDs as object keys. Resolve that
-          // canonical key first; then support legacy code/name keys. Keep a saved zero as a
-          // valid rate (e.g. an employee may intentionally have no IELTS rate).
-          const sameEmployeeRateRows=rateValues.filter(v =>
-            employeeId(v)===recordEmployeeId && clean(v.group_id)===clean(col.group_id)
-          );
+          // Resolve the rate per COLUMN, not by choosing one row for the whole group.
+          // A group can have multiple saved rows across policy versions; each row may
+          // contain only some of the group's column values. Prefer the period policy,
+          // then fall back per column without letting an incomplete row hide other rates.
           const preferredRows=[
-            ...sameEmployeeRateRows.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
-            ...sameEmployeeRateRows.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
-          ];
-          const rateKeys=[clean(col.id),clean(col.code),clean(col.name),clean(col.label)].filter(Boolean);
+            ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
+            ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
+            ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
+          ].filter(v=>clean(v.group_id)===clean(col.group_id));
+          const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
           let rate;
           for(const candidate of preferredRows){
-            const values=candidate?.values && typeof candidate.values==='object' && !Array.isArray(candidate.values) ? candidate.values : {};
-            // Canonical UUID key is authoritative for dynamic columns.
-            if(Object.prototype.hasOwnProperty.call(values,clean(col.id)) && values[clean(col.id)]!==null && values[clean(col.id)]!=='') {
-              rate=values[clean(col.id)];
-              break;
-            }
-            for(const key of rateKeys.slice(1)){
-              if(Object.prototype.hasOwnProperty.call(values,key) && values[key]!==null && values[key]!=='') { rate=values[key]; break; }
-            }
+            const values=candidate?.values && typeof candidate.values==='object' ? candidate.values : {};
+            for(const key of rateKeys){if(Object.prototype.hasOwnProperty.call(values,key)&&values[key]!==undefined&&values[key]!==null&&values[key]!==''){rate=values[key];break;}}
             if(rate===undefined){
               const wanted=new Set(rateKeys.map(norm));
-              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==null&&values[key]!==undefined&&values[key]!=='');
+              const matchedKey=Object.keys(values).find(key=>wanted.has(norm(key))&&values[key]!==undefined&&values[key]!==null&&values[key]!=='');
               if(matchedKey!==undefined) rate=values[matchedKey];
             }
             if(rate!==undefined) break;
