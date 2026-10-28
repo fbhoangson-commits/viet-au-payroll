@@ -172,11 +172,9 @@ export default function Page() {
     if (!window.confirm(`XÓA KỲ ${label}?\n\nThao tác này không thể hoàn tác. Hệ thống sẽ chỉ xóa kỳ nếu chưa có dữ liệu nghiệp vụ liên kết; nếu đã phát sinh dữ liệu, thao tác sẽ bị chặn để bảo vệ lịch sử chấm công và tính lương.`)) return;
     setSaving(true); setError(''); setMessage('');
     try {
-      // Refuse hard-delete when any known period-scoped business data exists.
-      // Never cascade-delete attendance, payroll, insurance/tax or historical records.
+      // Membership rows are created automatically when a period is created.
+      // They may be removed with the period, but actual attendance/payroll data must be preserved.
       const dependencies = [
-        ['payroll_period_employees', 'Nhân sự kỳ'],
-        ['payroll_period_employee_snapshots', 'Snapshot nhân sự'],
         ['teaching_attendance_records', 'Chấm Công Tiết Dạy'],
         ['daily_attendance_records', 'Chấm công ngày'],
         ['payroll_period_insurance_tax_data', 'Dữ liệu BHXH/thuế'],
@@ -193,6 +191,14 @@ export default function Page() {
       if (linked.length) {
         setError(`Không thể xóa kỳ ${label} vì đã có dữ liệu liên kết (${linked.join('; ')}). Hãy giữ kỳ để bảo toàn dữ liệu lịch sử.`);
         return;
+      }
+      // The employee list/snapshot is part of the period setup, not payroll history by itself.
+      // Delete only these membership rows after confirming no period-scoped business records exist.
+      for (const table of ['payroll_period_employees', 'payroll_period_employee_snapshots']) {
+        const { error: membershipDeleteError } = await supabase.from(table).delete().eq('period_id', period.id);
+        if (membershipDeleteError) {
+          throw new Error(`Không thể xóa danh sách nhân sự kỳ trong bảng ${table}: ${membershipDeleteError.message}. Kỳ lương chưa được xóa.`);
+        }
       }
       const { error: deleteError } = await supabase.from(TABLE).delete().eq('id', period.id);
       if (deleteError) throw deleteError;
