@@ -200,8 +200,17 @@ export default function Page() {
           throw new Error(`Không thể xóa danh sách nhân sự kỳ trong bảng ${table}: ${membershipDeleteError.message}. Kỳ lương chưa được xóa.`);
         }
       }
-      const { error: deleteError } = await supabase.from(TABLE).delete().eq('id', period.id);
+      // Supabase/Postgres RLS can silently affect zero rows on DELETE without returning an error.
+      // Request the deleted ID so the UI only reports success when the database confirms deletion.
+      const { data: deletedRows, error: deleteError } = await supabase
+        .from(TABLE)
+        .delete()
+        .eq('id', period.id)
+        .select('id');
       if (deleteError) throw deleteError;
+      if (!deletedRows || deletedRows.length === 0) {
+        throw new Error(`Supabase không xóa bản ghi kỳ ${label}. Khả năng cao quyền DELETE/RLS trên bảng ${TABLE} chưa cho phép tài khoản hiện tại xóa. Danh sách nhân sự kỳ đã được dọn trước đó; bản ghi kỳ vẫn được giữ nguyên. Cần kiểm tra policy DELETE của bảng payroll_periods.`);
+      }
       if (selected?.id === period.id) setSelected(null);
       setMessage(`Đã xóa kỳ ${label}.`);
       await load(false);
