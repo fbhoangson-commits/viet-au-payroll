@@ -23,3 +23,13 @@
 .pa-result-table th.pa-col-taxable_income,.pa-result-table th.pa-col-personal_income_tax,
 .pa-result-table th.pa-col-gross_income,.pa-result-table th.pa-col-net_pay{text-align:right}
 @media(max-width:620px){.pa-result-table{min-width:1900px}}
+
+/* V4: deterministic payroll order and practical widths for identity + money columns */
+.pa-result-table .pa-col-employee_code{width:105px}
+.pa-result-table .pa-col-employee_name{width:190px}
+.pa-result-table .pa-col-classification{width:125px}
+.pa-result-table .pa-col-fixed,.pa-result-table .pa-col-teaching,
+.pa-result-table .pa-col-additions,.pa-result-table .pa-col-deductions,
+.pa-result-table .pa-col-insurance_employee,.pa-result-table .pa-col-union_employee,
+.pa-result-table .pa-col-taxable_income,.pa-result-table .pa-col-personal_income_tax,
+.pa-result-table .pa-col-gross_income,.pa-result-table .pa-col-net_pay{width:145px;text-align:right}

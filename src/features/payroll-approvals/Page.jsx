@@ -126,7 +126,20 @@ export default function Page() {
   const snapshotKeys = useMemo(() => {
     const keys = new Set();
     resultRows.forEach(row => Object.keys(row || {}).forEach(key => keys.add(key)));
-    return [...keys];
+    // Keep the same business order as Tổng Hợp Lương; only append any future
+    // snapshot fields after the standard payroll columns.
+    const preferred = [
+      'employee_code', 'employee_name', 'classification',
+      'fixed', 'teaching', 'additions', 'deductions',
+      'insurance_employee', 'union_employee',
+      'taxable_income', 'personal_income_tax',
+      'gross_income', 'net_pay', 'status',
+      'department', 'position', 'lesson_count',
+      'employer_insurance', 'employee_id',
+    ];
+    const ordered = preferred.filter(key => keys.has(key));
+    const extra = [...keys].filter(key => !preferred.includes(key)).sort((a, b) => a.localeCompare(b, 'vi'));
+    return [...ordered, ...extra];
   }, [resultRows]);
 
   return <main className="pa-page">
