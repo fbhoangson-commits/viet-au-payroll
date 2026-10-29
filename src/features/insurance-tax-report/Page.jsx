@@ -359,7 +359,10 @@ export default function Page() {
   }, [detailRows]);
   const taxKpis = useMemo(() => {
     const taxable = knownSum(detailRows.map(row => row.taxable_income));
-    const personalRelief = knownSum(detailRows.map(row => row.personal_relief_amount));
+    // Personal relief KPI follows the agreed reporting rule: count only employees
+    // marked as participating in insurance, multiplied by 15,500,000 VND each.
+    // Keep per-employee detail fields sourced from saved period data; do not mutate snapshots.
+    const personalRelief = detailRows.filter(row => row.participates_insurance === true).length * 15500000;
     const dependentRelief = knownSum(detailRows.map(row => row.dependent_relief_amount));
     const deductibleInsurance = knownSum(detailRows.map(row => row.insurance_deductible_amount));
     const tax = knownSum(detailRows.map(row => row.personal_income_tax));
