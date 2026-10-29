@@ -16,6 +16,7 @@ const periodName = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?
 const statusKey = value => clean(value).toUpperCase();
 const statusName = value => ({ DRAFT: 'Bản nháp', PENDING: 'Chờ duyệt', SUBMITTED: 'Chờ duyệt', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', LOCKED: 'Đã khóa', CANCELLED: 'Đã hủy' }[statusKey(value)] || clean(value) || 'Chưa xác định');
 const statusTone = value => ({ DRAFT: 'draft', PENDING: 'pending', SUBMITTED: 'pending', APPROVED: 'approved', LOCKED: 'approved', REJECTED: 'rejected' }[statusKey(value)] || 'muted');
+const participatesInsurance = value => value === true || ['true', '1', 'yes', 'co', 'tham gia', 'dang tham gia'].includes(norm(value));
 const errorText = error => error?.message || error?.details || String(error || 'Lỗi không xác định');
 const rowList = snapshot => {
   if (Array.isArray(snapshot)) return snapshot;
@@ -56,7 +57,7 @@ function Bars({ items, emptyText = 'Chưa có dữ liệu để phân tích.' })
 }
 
 export default function Page() {
-  const [periods, setPeriods] = useState([]); const [runs, setRuns] = useState([]); const [approvals, setApprovals] = useState([]); const [employees, setEmployees] = useState([]);
+  const [periods, setPeriods] = useState([]); const [runs, setRuns] = useState([]); const [approvals, setApprovals] = useState([]); const [employees, setEmployees] = useState([]); const [periodInsuranceTaxData, setPeriodInsuranceTaxData] = useState([]);
   const [periodId, setPeriodId] = useState(''); const [runId, setRunId] = useState(''); const [statusFilter, setStatusFilter] = useState('ALL');
   const [fromPeriodId, setFromPeriodId] = useState(''); const [toPeriodId, setToPeriodId] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('ALL'); const [departmentFilter, setDepartmentFilter] = useState('ALL'); const [search, setSearch] = useState(''); const [sortKey, setSortKey] = useState('gross_income'); const [sortDirection, setSortDirection] = useState('desc');
@@ -67,13 +68,14 @@ export default function Page() {
     if (!isSupabaseConfigured || !supabase) { setError('Supabase chưa được cấu hình. Không thể tải báo cáo quỹ lương thực tế.'); setLoading(false); setRefreshing(false); return; }
     setRefreshing(true); setError(''); setWarnings([]); const nextWarnings = [];
     try {
-      const [periodData, runData, approvalData, employeeData] = await Promise.all([
+      const [periodData, runData, approvalData, employeeData, insuranceTaxData] = await Promise.all([
         fetchAll('payroll_periods'), fetchAll('payroll_runs'),
         fetchAll('payroll_approvals').catch(e => { nextWarnings.push(`Không đọc được lịch sử duyệt: ${errorText(e)}`); return []; }),
         fetchAll('employees').catch(e => { nextWarnings.push(`Không đọc được Employee Master để bổ sung thông tin còn thiếu: ${errorText(e)}`); return []; }),
+        fetchAll('payroll_period_insurance_tax_data').catch(e => { nextWarnings.push(`Không đọc được Dữ Liệu Kỳ Lương BHXH/thuế: ${errorText(e)}`); return []; }),
       ]);
       const validPeriods = periodData || []; const validRuns = runData || [];
-      setPeriods(validPeriods); setRuns(validRuns); setApprovals(approvalData || []); setEmployees(employeeData || []); setUpdatedAt(new Date().toISOString());
+      setPeriods(validPeriods); setRuns(validRuns); setApprovals(approvalData || []); setEmployees(employeeData || []); setPeriodInsuranceTaxData(insuranceTaxData || []); setUpdatedAt(new Date().toISOString());
       const sortedPeriods = [...validPeriods].sort((a, b) => String(a.period_year || a.start_date || a.created_at || '').localeCompare(String(b.period_year || b.start_date || b.created_at || '')) || num(a.period_month) - num(b.period_month));
       if (keepSelection && periodId && validPeriods.some(p => p.id === periodId)) {
         const options = orderedRuns(validRuns.filter(r => r.payroll_period_id === periodId));
@@ -98,14 +100,23 @@ export default function Page() {
   const rawRows = useMemo(() => rowList(selectedRun?.input_snapshot), [selectedRun]);
   const totalsFromSnapshot = useMemo(() => totalsObject(selectedRun?.input_snapshot) || (selectedRun?.saved_totals && typeof selectedRun.saved_totals === 'object' ? selectedRun.saved_totals : null), [selectedRun]);
   const employeeById = useMemo(() => new Map(employees.map(employee => [clean(employee.id), employee])), [employees]);
+  const selectedPeriodId = clean(selectedRun?.payroll_period_id || periodId);
+  const periodInsuranceRows = useMemo(() => periodInsuranceTaxData.filter(row => clean(row.period_id) === selectedPeriodId), [periodInsuranceTaxData, selectedPeriodId]);
+  const periodInsuranceById = useMemo(() => new Map(periodInsuranceRows.filter(row => clean(row.employee_id)).map(row => [clean(row.employee_id), row])), [periodInsuranceRows]);
+  const periodInsuranceByCode = useMemo(() => new Map(periodInsuranceRows.filter(row => clean(row.employee_code)).map(row => [clean(row.employee_code).toLocaleUpperCase('vi'), row])), [periodInsuranceRows]);
   const normalizedRows = useMemo(() => rawRows.map(row => {
     const master = employeeById.get(clean(row?.employee_id)) || {};
-    const result = { ...row,
-      employee_code: codeOf(row) || codeOf(master), employee_name: nameOf(row) || nameOf(master) || 'Chưa có tên',
+    const employeeCode = codeOf(row) || codeOf(master);
+    const periodInsurance = periodInsuranceById.get(clean(row?.employee_id)) || periodInsuranceByCode.get(employeeCode.toLocaleUpperCase('vi')) || {};
+    const base = periodInsurance.insurance_salary_base === null || periodInsurance.insurance_salary_base === undefined || periodInsurance.insurance_salary_base === '' ? null : Number(periodInsurance.insurance_salary_base);
+    const participates = participatesInsurance(periodInsurance.participates_insurance);
+    const employerInsuranceCalculated = participates && base !== null && Number.isFinite(base) ? Math.round(base * 0.215) : null;
+    return { ...row,
+      employee_code: employeeCode, employee_name: nameOf(row) || nameOf(master) || 'Chưa có tên',
       classification: classOf(row) || classOf(master), department: deptOf(row) || deptOf(master),
+      employer_insurance_calculated: employerInsuranceCalculated,
     };
-    return result;
-  }).sort((a, b) => codeOf(a).localeCompare(codeOf(b), 'vi', { numeric: true })), [rawRows, employeeById]);
+  }).sort((a, b) => codeOf(a).localeCompare(codeOf(b), 'vi', { numeric: true })), [rawRows, employeeById, periodInsuranceById, periodInsuranceByCode]);
   const classificationOptions = useMemo(() => [...new Set(normalizedRows.map(classOf).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [normalizedRows]);
   const departmentOptions = useMemo(() => [...new Set(normalizedRows.map(deptOf).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [normalizedRows]);
   const filteredRows = useMemo(() => {
@@ -120,14 +131,22 @@ export default function Page() {
   const sums = useMemo(() => {
     const result = { employee_count: normalizedRows.length };
     [...moneyFields.map(([key]) => key), 'employer_insurance'].forEach(key => {
-      const present = normalizedRows.some(row => row[key] !== undefined && row[key] !== null && row[key] !== '');
+      const calculatedEmployer = key === 'employer_insurance' && normalizedRows.some(row => row.employer_insurance_calculated !== null && row.employer_insurance_calculated !== undefined);
+      const present = calculatedEmployer || normalizedRows.some(row => row[key] !== undefined && row[key] !== null && row[key] !== '');
       result[`${key}_available`] = present;
-      result[key] = normalizedRows.reduce((sum,row) => sum + num(row[key]), 0);
+      result[key] = calculatedEmployer
+        ? normalizedRows.reduce((sum,row) => sum + num(row.employer_insurance_calculated), 0)
+        : normalizedRows.reduce((sum,row) => sum + num(row[key]), 0);
     });
     return result;
   }, [normalizedRows]);
-  const hasSource = key => (totalsFromSnapshot && totalsFromSnapshot[key] !== undefined && totalsFromSnapshot[key] !== null) || normalizedRows.some(row => row[key] !== undefined && row[key] !== null && row[key] !== '');
-  const totalFor = key => totalsFromSnapshot && totalsFromSnapshot[key] !== undefined && totalsFromSnapshot[key] !== null ? num(totalsFromSnapshot[key]) : (key === 'employee_count' ? normalizedRows.length : sums[key]);
+  const hasSource = key => (key === 'employer_insurance' && normalizedRows.some(row => row.employer_insurance_calculated !== null && row.employer_insurance_calculated !== undefined))
+    || (totalsFromSnapshot && totalsFromSnapshot[key] !== undefined && totalsFromSnapshot[key] !== null)
+    || normalizedRows.some(row => row[key] !== undefined && row[key] !== null && row[key] !== '');
+  const totalFor = key => {
+    if (key === 'employer_insurance' && normalizedRows.some(row => row.employer_insurance_calculated !== null && row.employer_insurance_calculated !== undefined)) return sums.employer_insurance;
+    return totalsFromSnapshot && totalsFromSnapshot[key] !== undefined && totalsFromSnapshot[key] !== null ? num(totalsFromSnapshot[key]) : (key === 'employee_count' ? normalizedRows.length : sums[key]);
+  };
   const valueFor = key => hasSource(key) ? money(totalFor(key)) : 'Chưa đủ dữ liệu';
   const hasSnapshot = Boolean(selectedRun && selectedRun.input_snapshot && typeof selectedRun.input_snapshot === 'object');
   const declaredCount = selectedRun?.snapshot_rows ?? totalsFromSnapshot?.employee_count ?? rawRows.length;
@@ -221,7 +240,7 @@ export default function Page() {
         <Metric title="Nhân sự" value={num(totalsFromSnapshot?.employee_count??declaredCount??normalizedRows.length).toLocaleString('vi-VN')} subtitle="Theo snapshot" icon={Users}/>
         <Metric title="Lương cố định" value={valueFor('fixed')} subtitle="Đã lưu" icon={Wallet}/><Metric title="Tiết dạy & phụ đạo" value={valueFor('teaching')} subtitle="Đã lưu" icon={BarChart3}/><Metric title="Khoản cộng" value={valueFor('additions')} subtitle="Đã lưu" icon={CheckCircle2}/><Metric title="Tổng thu nhập" value={valueFor('gross_income')} subtitle="Không bao gồm chi phí đơn vị" icon={Wallet} primary/>
         <Metric title="Khoản trừ" value={valueFor('deductions')} subtitle="Khoản trừ riêng" icon={ShieldCheck}/><Metric title="BHXH NLĐ" value={valueFor('insurance_employee')} subtitle="Phần người lao động đóng" icon={ShieldCheck}/><Metric title="Phí Công đoàn" value={valueFor('union_employee')} subtitle="Phần người lao động đóng" icon={Users}/><Metric title="Thuế TNCN" value={valueFor('personal_income_tax')} subtitle="Đã lưu" icon={ShieldCheck}/><Metric title="Thực lĩnh" value={valueFor('net_pay')} subtitle="Đã lưu" icon={Wallet} primary/>
-        <Metric title="BHXH đơn vị" value={employerAvailable?money(totalFor('employer_insurance')):'Chưa đủ dữ liệu'} subtitle="Phần đơn vị đóng" icon={Building2}/><Metric title="Chi phí nhân sự" value={costAvailable?money(totalCost):'Chưa đủ dữ liệu'} subtitle="Tổng thu nhập + BHXH đơn vị; chỉ khi đủ dữ liệu" icon={Wallet}/>
+        <Metric title="BHXH đơn vị" value={employerAvailable?money(totalFor('employer_insurance')):'Chưa đủ dữ liệu'} subtitle="Căn cứ đóng × 21,5% cho nhân sự tham gia" icon={Building2}/><Metric title="Chi phí nhân sự" value={costAvailable?money(totalCost):'Chưa đủ dữ liệu'} subtitle="Tổng thu nhập + BHXH đơn vị; chỉ khi đủ dữ liệu" icon={Wallet}/>
       </div></section>
       <section className="sf-chart-grid"><article className="sf-card"><div className="sf-card-title"><div><h2>Cơ cấu thu nhập</h2><p>Thành phần đã lưu trong snapshot.</p></div></div><Bars items={incomes.map(i=>({...i,share:hasSource('gross_income')&&totalFor('gross_income')>0&&i.value!=null?i.value/totalFor('gross_income')*100:null}))}/></article><article className="sf-card"><div className="sf-card-title"><div><h2>Cơ cấu khấu trừ NLĐ</h2><p>Không bao gồm khoản do đơn vị đóng.</p></div></div><Bars items={deductions.map(i=>({...i,share:null}))}/></article><article className="sf-card sf-wide"><div className="sf-card-title"><div><h2>So sánh quỹ lương theo kỳ</h2><p>Mỗi kỳ chỉ dùng một phiên bản, ưu tiên bản đã duyệt/khóa.</p></div></div>{comparisonData.filter(i=>i.valid).length<2?<div className="sf-empty-inline">Chưa đủ ít nhất hai kỳ có snapshot hợp lệ để so sánh.</div>:<div className="sf-table-scroll"><table className="sf-table sf-compare"><thead><tr><th>Kỳ lương</th><th>Phiên bản</th><th>Trạng thái</th><th>Nhân sự</th><th>Lương cố định</th><th>Tiết dạy</th><th>Khoản cộng</th><th>Tổng thu nhập</th><th>Khoản trừ</th><th>Thuế TNCN</th><th>Thực lĩnh</th></tr></thead><tbody>{comparisonData.map(item=>item.valid?<tr key={item.run.id}><td>{periodName(item.period)}</td><td>#{item.run.run_number??'—'}</td><td><span className={`sf-status ${statusTone(item.run.status)}`}>{statusName(item.run.status)}</span>{item.draftFallback&&<small className="sf-fallback-note">Chưa có bản duyệt</small>}</td><td>{num(item.employee_count).toLocaleString('vi-VN')}</td>{['fixed','teaching','additions','gross_income','deductions','personal_income_tax','net_pay'].map(key=><td key={key}>{money(item[key])}</td>)}</tr>:<tr key={item.period.id}><td>{periodName(item.period)}</td><td colSpan="10" className="sf-muted">{item.reason}</td></tr>)}</tbody></table></div>}{latestComparison&&previousComparison&&<div className="sf-delta-grid">{[['Tổng thu nhập','gross_income'],['Thực lĩnh','net_pay'],['Thuế TNCN','personal_income_tax']].map(([label,key])=>{const change=delta(latestComparison[key],previousComparison[key]);return <div key={key}><small>{label} · {periodName(latestComparison.period)} so với {periodName(previousComparison.period)}</small><strong>{money(latestComparison[key]-previousComparison[key])}</strong><span>{change==null?'Không đủ cơ sở so sánh':`${change>0?'+':''}${change.toLocaleString('vi-VN',{maximumFractionDigits:1})}%`}</span></div>;})}<div><small>Thay đổi số nhân sự</small><strong>{num(latestComparison.employee_count)-num(previousComparison.employee_count)}</strong><span>{periodName(previousComparison.period)} → {periodName(latestComparison.period)}</span></div></div>}</article>
       <article className="sf-card"><div className="sf-card-title"><div><h2>Theo phân loại nhân sự</h2><p>Số lượng, thành phần thu nhập và thực lĩnh.</p></div></div>{classificationData.length?<div className="sf-table-scroll"><table className="sf-table"><thead><tr><th>Phân loại</th><th>Nhân sự</th><th>Tổng thu nhập</th><th>Thực lĩnh</th><th>Bình quân</th></tr></thead><tbody>{classificationData.map(item=><tr key={item.label}><td>{item.label}</td><td>{item.count}</td><td>{money(item.gross_income)}</td><td>{money(item.net_pay)}</td><td>{money(item.count?item.gross_income/item.count:0)}</td></tr>)}</tbody></table></div>:<div className="sf-empty-inline">Snapshot chưa có phân loại nhân sự.</div>}</article>

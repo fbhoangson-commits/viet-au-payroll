@@ -299,7 +299,13 @@ export default function Page() {
     const employeeInsuranceTotal = moneyField(result, ['insurance_employee', 'insuranceEmployee', 'employee_insurance_amount'])
       ?? moneyField(tax, ['employee_insurance_amount', 'insurance_employee_amount'])
       ?? calculatedEmployeeInsurance;
-    const employerInsuranceTotal = moneyField(result, ['employer_insurance', 'employerInsurance', 'employer_insurance_amount'])
+    // Phần đơn vị đóng được xác định từ Dữ Liệu Kỳ Lương:
+    // chỉ tính nhân sự có tham gia BHXH và có căn cứ đóng, theo mức 21,5%.
+    // Quy tắc này dùng cho báo cáo; không ghi ngược vào snapshot hoặc Supabase.
+    const calculatedEmployerInsurance = participation === true && base !== null
+      ? Math.round(base * 0.215) : null;
+    const employerInsuranceTotal = calculatedEmployerInsurance
+      ?? moneyField(result, ['employer_insurance', 'employerInsurance', 'employer_insurance_amount'])
       ?? moneyField(tax, ['employer_insurance_amount', 'insurance_employer_amount']);
     const personalRelief = moneyField(tax, ['personal_relief_amount']) ?? moneyField(taxReliefConfig, ['personal_relief_amount']);
     const dependentReliefUnit = moneyField(tax, ['dependent_relief_amount']) ?? moneyField(taxReliefConfig, ['dependent_relief_amount']);
@@ -332,7 +338,7 @@ export default function Page() {
       employee_health_amount: healthEmployee,
       employee_unemployment_rate: unemploymentRate,
       employee_unemployment_amount: unemploymentEmployee,
-      employee_insurance_amount: employeeInsuranceTotal, employer_insurance_amount: employerInsuranceTotal,
+      employee_insurance_amount: employeeInsuranceTotal, employer_insurance_amount: employerInsuranceTotal, _employerInsuranceCalculated: calculatedEmployerInsurance !== null,
       taxable_income: taxableIncome, personal_relief_amount: personalRelief, dependent_count: count,
       dependent_relief_amount: dependentRelief, insurance_deductible_amount: deductibleInsurance,
       taxable_income_base: taxableBase, personal_income_tax: taxAmount,
@@ -361,7 +367,9 @@ export default function Page() {
   const insuranceKpis = useMemo(() => {
     const totalBase = knownSum(detailRows.filter(row => row.participates_insurance === true).map(row => row.insurance_salary_base));
     const employeeInsurance = knownSum(detailRows.map(row => row.employee_insurance_amount));
-    const employerInsurance = knownSum(detailRows.map(row => row.employer_insurance_amount));
+    const employerInsurance = detailRows.some(row => row._employerInsuranceCalculated)
+      ? detailRows.reduce((sum, row) => sum + (numberOrNull(row.employer_insurance_amount) ?? 0), 0)
+      : knownSum(detailRows.map(row => row.employer_insurance_amount));
     const social = knownSum(detailRows.map(row => row.employee_social_amount));
     const health = knownSum(detailRows.map(row => row.employee_health_amount));
     const unemployment = knownSum(detailRows.map(row => row.employee_unemployment_amount));
