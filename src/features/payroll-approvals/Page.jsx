@@ -196,7 +196,7 @@ export default function Page() {
       return;
     }
     const headers = exportKeys.map(key => `<th>${escapeHtml(snapshotLabel(key))}</th>`).join('');
-    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
+    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric ' : ''}${key === 'net_pay' ? 'net-pay' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
     const totalKeys = exportKeys.filter(key => !['employee_code','employee_name'].includes(key));
     const totalLabelCount = exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length;
     const totals = totalKeys.map(key => {
@@ -213,21 +213,25 @@ h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}p{font-size:8p
 table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
 th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
 th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr{break-inside:avoid}
+td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.net-pay{font-size:10pt;font-weight:800;color:#102d4a}
+tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-.confirmation{border:1px solid #7d8c98;border-radius:2px;padding:8px 10px;margin-top:7mm;font-size:8pt;line-height:1.5}
-.confirmation strong{display:block;font-size:9pt;margin-bottom:2mm}
-.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:15mm;page-break-inside:avoid;text-align:center}
-.signature-title{font-weight:700;font-size:9pt}.signature-name{font-weight:700;margin-top:22mm;font-size:9pt}
+.confirmation{border:2px dashed #9aaabd;border-radius:8mm;background:#f8faff;padding:8mm 10mm;margin-top:7mm;font-size:10pt;line-height:1.55;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.confirmation-heading{display:flex;align-items:center;gap:3mm;color:#3265a0;font-weight:800;font-size:15pt;letter-spacing:.2px;margin-bottom:3mm}
+.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-size:19pt;font-weight:800;line-height:1}
+.confirmation-time{display:block;color:#172b3a;font-weight:800;font-size:13pt;margin-bottom:1mm}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:12mm;page-break-inside:avoid;text-align:center}
+.signature-title{font-weight:700;font-size:10pt;text-transform:none}.signature-name{font-weight:700;margin-top:20mm;font-size:10pt}
 @media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
 </style></head><body>
 <header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
 <div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
 <div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
-<section class="confirmation"><strong>XÁC NHẬN BẢNG LƯƠNG</strong>Bảng lương này được xuất từ hệ thống VIỆT ÂU PAYROLL.<br>Thời điểm in bản lương: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</section>
-<section class="signatures"><div><div class="signature-title">NGƯỜI LẬP</div><div class="signature-name">PHẠM MINH TÂM</div></div><div><div class="signature-title">DUYỆT BẢNG LƯƠNG</div><div class="signature-name">NGUYỄN CƯỜNG</div></div></section>
+<section class="confirmation"><div class="confirmation-heading"><span class="confirmation-check">✓</span><span>XÁC NHẬN HỆ THỐNG</span></div><span class="confirmation-time">Thời gian in: ${escapeHtml(new Date().toLocaleTimeString('vi-VN'))} ${escapeHtml(new Date().toLocaleDateString('vi-VN'))}</span>Tài liệu được tổng hợp chi tiết trực tiếp từ hệ thống VIỆT ÂU PAYROLL.<br>Thông tin thể hiện theo dữ liệu ghi nhận tại thời điểm in.</section>
+<section class="signatures"><div><div class="signature-title">Người lập</div><div class="signature-name">PHẠM MINH TÂM</div></div><div><div class="signature-title">Duyệt Bảng Lương</div><div class="signature-name">NGUYỄN CƯỜNG</div></div></section>
 </body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
