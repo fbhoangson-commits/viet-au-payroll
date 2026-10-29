@@ -89,7 +89,7 @@ export default function Page() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [approvalWarning, setApprovalWarning] = useState('');
-  const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'net_pay']);
+  const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'net_pay', 'personal_income_tax']);
   const [exportError, setExportError] = useState('');
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeDepartment, setEmployeeDepartment] = useState('ALL');
@@ -260,7 +260,7 @@ export default function Page() {
       return;
     }
     const headers = exportKeys.map(key => `<th>${escapeHtml(snapshotLabel(key))}</th>`).join('');
-    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
+    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric ' : ''}${key === 'net_pay' ? 'net-pay' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
     const totalKeys = exportKeys.filter(key => !['employee_code','employee_name'].includes(key));
     const totalLabelCount = exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length;
     const totals = totalKeys.map(key => {
@@ -268,26 +268,41 @@ export default function Page() {
       const total = filteredResultRows.reduce((sum,row) => sum + (Number(row?.[key]) || 0), 0);
       return `<td class="numeric">${escapeHtml(displayValue(total,key))}</td>`;
     }).join('');
-    const title = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
+    const title = `${periodName(selectedPeriod)} - BẢNG LƯƠNG`;
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
-h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}p{font-size:8pt;color:#52677a;margin:0 0 1mm}
+@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#172b3a;margin:0;font-size:9pt;font-synthesis:none;-webkit-font-smoothing:antialiased}
+h1{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:15pt;margin:0 0 3mm}h2{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:11pt;margin:0 0 2mm}p{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8pt;color:#52677a;margin:0 0 1mm}
 .meta{display:flex;gap:7mm;flex-wrap:wrap;margin:3mm 0 6mm;font-size:8pt}
 table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
 th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
 th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr{break-inside:avoid}
+td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.net-pay{font-size:10pt;font-weight:800;color:#102d4a}
+tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}button{margin-bottom:8mm;padding:8px 12px}}
-</style></head><body><button onclick="window.print()">In / Lưu PDF</button>
-<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>${escapeHtml(title)}</h2>
+.approval-footer{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5mm;align-items:stretch;margin-top:6mm;page-break-inside:avoid;break-inside:avoid;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif}
+.confirmation{width:auto;min-width:0;max-width:none;border:1.5px dashed #9aaabd;border-radius:3mm;background:#f8faff;padding:3mm 3.5mm;margin:0;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:7pt;line-height:1.3;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
+.confirmation-heading{display:flex;align-items:center;gap:1.5mm;color:#3265a0;font-weight:700;font-size:9pt;letter-spacing:0;margin-bottom:1.5mm}
+.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:12pt;font-weight:700;line-height:1}
+.confirmation-time{display:block;color:#172b3a;font-weight:700;font-size:7.5pt;margin-bottom:1mm;white-space:normal}
+.signature-block{min-width:0;text-align:center;display:flex;flex-direction:column;align-items:center;padding-top:2mm}
+.signature-title{font-weight:600;font-size:9pt;text-transform:none}
+.signature-name{font-weight:700;margin-top:auto;padding-top:19mm;font-size:9pt}
+@media screen{.approval-footer{grid-template-columns:repeat(3,minmax(0,1fr))}.confirmation{width:auto;min-width:0;max-width:none}}
+@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
+</style></head><body>
+<header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
-<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
+<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
 <div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
-<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Ngày xuất: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
-<script>window.addEventListener('load',()=>window.print());</script></body></html>`;
+<section class="approval-footer">
+  <div class="confirmation"><div class="confirmation-heading"><span class="confirmation-check">✓</span><span>XÁC NHẬN HỆ THỐNG</span></div><span class="confirmation-time">Thời gian in: ${escapeHtml(new Date().toLocaleTimeString('vi-VN'))} ${escapeHtml(new Date().toLocaleDateString('vi-VN'))}</span>Tài liệu được tổng hợp chi tiết trực tiếp từ hệ thống VIỆT ÂU PAYROLL.<br>Thông tin thể hiện theo dữ liệu ghi nhận tại thời điểm in.</div>
+  <div class="signature-block"><div class="signature-title">Người lập</div><div class="signature-name">PHẠM MINH TÂM</div></div>
+  <div class="signature-block"><div class="signature-title">Duyệt Bảng Lương</div><div class="signature-name">NGUYỄN CƯỜNG</div></div>
+</section>
+</body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
       setExportError('Trình duyệt đã chặn cửa sổ in. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.');
