@@ -218,21 +218,26 @@ td.net-pay{font-size:10pt;font-weight:800;color:#102d4a}
 tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-.confirmation{width:34%;min-width:78mm;max-width:105mm;border:1.5px dashed #9aaabd;border-radius:4mm;background:#f8faff;padding:4mm 5mm;margin-top:6mm;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8pt;line-height:1.35;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
-.confirmation-heading{display:flex;align-items:center;gap:2mm;color:#3265a0;font-weight:700;font-size:10pt;letter-spacing:0;margin-bottom:2mm}
-.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:13pt;font-weight:700;line-height:1}
-.confirmation-time{display:block;color:#172b3a;font-weight:700;font-size:8.5pt;margin-bottom:1mm;white-space:normal}
-.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:12mm;page-break-inside:avoid;text-align:center;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif}
-.signature-title{font-weight:600;font-size:9pt;text-transform:none}.signature-name{font-weight:700;margin-top:20mm;font-size:9pt}
-@media screen{.confirmation{width:34%;min-width:360px;max-width:520px}}
+.approval-footer{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5mm;align-items:stretch;margin-top:6mm;page-break-inside:avoid;break-inside:avoid;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif}
+.confirmation{width:auto;min-width:0;max-width:none;border:1.5px dashed #9aaabd;border-radius:3mm;background:#f8faff;padding:3mm 3.5mm;margin:0;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:7pt;line-height:1.3;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
+.confirmation-heading{display:flex;align-items:center;gap:1.5mm;color:#3265a0;font-weight:700;font-size:9pt;letter-spacing:0;margin-bottom:1.5mm}
+.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:12pt;font-weight:700;line-height:1}
+.confirmation-time{display:block;color:#172b3a;font-weight:700;font-size:7.5pt;margin-bottom:1mm;white-space:normal}
+.signature-block{min-width:0;text-align:center;display:flex;flex-direction:column;align-items:center;padding-top:2mm}
+.signature-title{font-weight:600;font-size:9pt;text-transform:none}
+.signature-name{font-weight:700;margin-top:auto;padding-top:19mm;font-size:9pt}
+@media screen{.approval-footer{grid-template-columns:repeat(3,minmax(0,1fr))}.confirmation{width:auto;min-width:0;max-width:none}}
 @media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
 </style></head><body>
 <header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
 <div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
 <div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
-<section class="confirmation"><div class="confirmation-heading"><span class="confirmation-check">✓</span><span>XÁC NHẬN HỆ THỐNG</span></div><span class="confirmation-time">Thời gian in: ${escapeHtml(new Date().toLocaleTimeString('vi-VN'))} ${escapeHtml(new Date().toLocaleDateString('vi-VN'))}</span>Tài liệu được tổng hợp chi tiết trực tiếp từ hệ thống VIỆT ÂU PAYROLL.<br>Thông tin thể hiện theo dữ liệu ghi nhận tại thời điểm in.</section>
-<section class="signatures"><div><div class="signature-title">Người lập</div><div class="signature-name">PHẠM MINH TÂM</div></div><div><div class="signature-title">Duyệt Bảng Lương</div><div class="signature-name">NGUYỄN CƯỜNG</div></div></section>
+<section class="approval-footer">
+  <div class="confirmation"><div class="confirmation-heading"><span class="confirmation-check">✓</span><span>XÁC NHẬN HỆ THỐNG</span></div><span class="confirmation-time">Thời gian in: ${escapeHtml(new Date().toLocaleTimeString('vi-VN'))} ${escapeHtml(new Date().toLocaleDateString('vi-VN'))}</span>Tài liệu được tổng hợp chi tiết trực tiếp từ hệ thống VIỆT ÂU PAYROLL.<br>Thông tin thể hiện theo dữ liệu ghi nhận tại thời điểm in.</div>
+  <div class="signature-block"><div class="signature-title">Người lập</div><div class="signature-name">PHẠM MINH TÂM</div></div>
+  <div class="signature-block"><div class="signature-title">Duyệt Bảng Lương</div><div class="signature-name">NGUYỄN CƯỜNG</div></div>
+</section>
 </body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
