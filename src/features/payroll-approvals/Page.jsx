@@ -89,7 +89,7 @@ export default function Page() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [approvalWarning, setApprovalWarning] = useState('');
-  const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'net_pay', 'personal_income_tax']);
+  const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'personal_income_tax', 'net_pay']);
   const [exportError, setExportError] = useState('');
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeDepartment, setEmployeeDepartment] = useState('ALL');
@@ -243,7 +243,11 @@ export default function Page() {
 
   const exportKeys = useMemo(() => {
     const identityKeys = ['employee_code', 'employee_name'].filter(key => snapshotKeys.includes(key));
-    return [...identityKeys, ...exportComponents.filter(key => snapshotKeys.includes(key))];
+    const selectedComponents = exportComponents.filter(key => snapshotKeys.includes(key));
+    // Thực lĩnh luôn là cột cuối cùng trên bản in, bất kể thứ tự chọn thành phần lương.
+    const orderedComponents = selectedComponents.filter(key => key !== 'net_pay');
+    if (selectedComponents.includes('net_pay')) orderedComponents.push('net_pay');
+    return [...identityKeys, ...orderedComponents];
   }, [snapshotKeys, exportComponents]);
   const printSnapshot = () => {
     setExportError('');
