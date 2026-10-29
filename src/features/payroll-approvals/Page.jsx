@@ -204,7 +204,7 @@ export default function Page() {
       const total = filteredResultRows.reduce((sum,row) => sum + (Number(row?.[key]) || 0), 0);
       return `<td class="numeric">${escapeHtml(displayValue(total,key))}</td>`;
     }).join('');
-    const title = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
+    const title = `${periodName(selectedPeriod)} - BẢNG LƯƠNG`;
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
 @page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
@@ -216,14 +216,19 @@ th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-col
 td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}button{margin-bottom:8mm;padding:8px 12px}}
-</style></head><body><button onclick="window.print()">In / Lưu PDF</button>
-<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>${escapeHtml(title)}</h2>
+.confirmation{border:1px solid #7d8c98;border-radius:2px;padding:8px 10px;margin-top:7mm;font-size:8pt;line-height:1.5}
+.confirmation strong{display:block;font-size:9pt;margin-bottom:2mm}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:15mm;page-break-inside:avoid;text-align:center}
+.signature-title{font-weight:700;font-size:9pt}.signature-name{font-weight:700;margin-top:22mm;font-size:9pt}
+@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
+</style></head><body>
+<header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
-<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
+<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
 <div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
-<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Ngày xuất: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
-<script>window.addEventListener('load',()=>window.print());</script></body></html>`;
+<section class="confirmation"><strong>XÁC NHẬN BẢNG LƯƠNG</strong>Bảng lương này được xuất từ hệ thống VIỆT ÂU PAYROLL.<br>Thời điểm in bản lương: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</section>
+<section class="signatures"><div><div class="signature-title">NGƯỜI LẬP</div><div class="signature-name">PHẠM MINH TÂM</div></div><div><div class="signature-title">DUYỆT BẢNG LƯƠNG</div><div class="signature-name">NGUYỄN CƯỜNG</div></div></section>
+</body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
       setExportError('Trình duyệt đã chặn cửa sổ in. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.');
