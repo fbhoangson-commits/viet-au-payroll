@@ -124,6 +124,9 @@ export default function PayrollCalculationPage({ page }) {
   const [search,setSearch] = useState('');
   const [typeFilter,setTypeFilter] = useState('ALL');
   const [dataLoaded,setDataLoaded] = useState(false);
+  const [savingRun,setSavingRun] = useState(false);
+  const [saveRunMessage,setSaveRunMessage] = useState('');
+  const [saveRunError,setSaveRunError] = useState('');
 
   const load = useCallback(async (keepPeriod=true) => {
     if (!isSupabaseConfigured || !supabase) {
@@ -336,6 +339,82 @@ export default function PayrollCalculationPage({ page }) {
     return s;
   },{fixed:0,teaching:0,additions:0,deductions:0,difference:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxable:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
 
+  // Save an immutable copy of the values already shown on screen.
+  // Always create a new run; never overwrite an earlier payroll snapshot.
+  const savePayrollRun = async () => {
+    if (!supabase || !isSupabaseConfigured || !selectedPeriod?.id || !rows.length || savingRun) return;
+    setSavingRun(true); setSaveRunMessage(''); setSaveRunError('');
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = authData?.user?.id;
+      if (!userId) throw new Error('Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.');
+
+      const { data: latestRuns, error: latestError } = await supabase
+        .from('payroll_runs').select('run_number')
+        .eq('payroll_period_id', selectedPeriod.id)
+        .order('run_number', { ascending: false }).limit(1);
+      if (latestError) throw latestError;
+      const runNumber = Math.max(0, ...((latestRuns || []).map(r => Number(r.run_number) || 0))) + 1;
+      const calculatedAt = new Date().toISOString();
+      const results = rows.map(r => ({
+        employee_id: r.id || null,
+        employee_code: r.code,
+        employee_name: r.name,
+        classification: r.classification || '',
+        department: r.department || '',
+        position: r.position || '',
+        fixed: num(r.fixed), teaching: num(r.teaching),
+        additions: num(r.additions), deductions: num(r.deductions),
+        insurance_employee: num(r.insuranceEmployee),
+        employer_insurance: num(r.employerInsurance),
+        union_employee: num(r.unionEmployee),
+        taxable_income: num(r.taxable), personal_income_tax: num(r.taxAmount),
+        gross_income: num(r.gross), net_pay: num(r.net),
+        lesson_count: num(r.lessonCount),
+        status: r.status || '',
+      }));
+      const inputSnapshot = {
+        schema_version: 1,
+        period: {
+          id: selectedPeriod.id,
+          period_code: selectedPeriod.period_code || selectedPeriod.code || '',
+          name: periodTitle(selectedPeriod),
+          month: selectedPeriod.month || selectedPeriod.period_month || null,
+          year: selectedPeriod.period_year || null,
+        },
+        calculated_at: calculatedAt,
+        calculated_by: userId,
+        totals: {
+          employee_count: rows.length,
+          fixed: num(totals.fixed), teaching: num(totals.teaching),
+          additions: num(totals.additions), deductions: num(totals.deductions),
+          insurance_employee: num(totals.insuranceEmployee),
+          employer_insurance: num(totals.employerInsurance),
+          union_employee: num(totals.unionEmployee),
+          taxable_income: num(totals.taxable), personal_income_tax: num(totals.taxAmount),
+          gross_income: num(totals.gross), net_pay: num(totals.net),
+        },
+        results,
+      };
+      const { data: inserted, error: insertError } = await supabase.from('payroll_runs').insert({
+        payroll_period_id: selectedPeriod.id,
+        run_number: runNumber,
+        status: 'DRAFT',
+        formula_version: 'payroll-calculation-ui-v1',
+        input_snapshot: inputSnapshot,
+        calculated_by: userId,
+        calculated_at: calculatedAt,
+      }).select('id, run_number').single();
+      if (insertError) throw insertError;
+      setSaveRunMessage(`Đã lưu phiên bản lương #${inserted.run_number} gồm ${rows.length} nhân sự cùng toàn bộ số liệu đang hiển thị. Phiên bản cũ không bị ghi đè; bản mới xuất hiện trong “Hồ sơ trình duyệt” ở trạng thái Bản nháp.`);
+    } catch (e) {
+      setSaveRunError(`Không lưu được phiên bản lương: ${errorText(e)}`);
+    } finally {
+      setSavingRun(false);
+    }
+  };
+
   const columns = useMemo(()=>{
     if(page==='period-employees')return ['code','name','classification','department','position','status'];
     if(page==='fixed-salary')return ['code','name','classification',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('fixedCol_')).slice(0,4),'fixed','status'];
@@ -364,8 +443,11 @@ export default function PayrollCalculationPage({ page }) {
       <label className="pc-search"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên..."/></label>
       <select className="pc-filter" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} aria-label="Lọc dữ liệu"><option value="ALL">Tất cả dữ liệu</option><option value="ISSUES">Cần kiểm tra</option>{[...new Set(rows.map(r=>r.classification).filter(Boolean))].map(v=><option key={v} value={v}>{v}</option>)}</select>
       <button className="pc-button" onClick={()=>load(true)} disabled={refreshing}><RefreshCw size={15}/> Làm mới</button>
+      {page==='payroll-summary'&&<button className="pc-button pc-primary" onClick={savePayrollRun} disabled={!rows.length||!selectedPeriod||savingRun||loading||refreshing}>{savingRun?'Đang lưu...':'Lưu kỳ lương để chuyển duyệt'}</button>}
       <button className="pc-button pc-primary" onClick={exportRows} disabled={!visible.length}><Download size={15}/> Xuất Excel</button>
     </div>
+    {saveRunMessage&&<div className="pc-alert"><ShieldCheck size={17}/><div><strong>Đã lưu phiên bản lương</strong><p>{saveRunMessage}</p></div></div>}
+    {saveRunError&&<div className="pc-alert pc-error"><AlertTriangle size={17}/><div><strong>Lưu phiên bản thất bại</strong><p>{saveRunError}</p></div></div>}
     {error&&<div className="pc-alert pc-error"><AlertTriangle size={17}/><div><strong>Không tải được dữ liệu</strong><p>{error}</p></div></div>}
     {warnings.length>0&&<div className="pc-alert"><AlertTriangle size={17}/><div><strong>Một số nguồn dữ liệu cần kiểm tra</strong><ul>{warnings.slice(0,5).map((w,i)=><li key={i}>{w}</li>)}</ul></div></div>}
     {page==='payroll-overview'&&<div className="pc-metrics">
