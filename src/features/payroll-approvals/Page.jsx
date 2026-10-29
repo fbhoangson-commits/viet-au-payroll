@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, RefreshCw, Search, ShieldCheck, XCircle, Printer } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, RefreshCw, Search, ShieldCheck, XCircle, Printer, Send, LockKeyhole } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../shared/supabase.js';
 import './payroll-approvals.css';
 
@@ -94,6 +94,10 @@ export default function Page() {
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeDepartment, setEmployeeDepartment] = useState('ALL');
   const [employeeClassification, setEmployeeClassification] = useState('ALL');
+  const [actionNote, setActionNote] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) {
@@ -130,6 +134,66 @@ export default function Page() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Workflow changes only the run status and appends an audit row. The immutable
+  // input_snapshot is deliberately never rewritten by this screen.
+  const transitionRun = async (nextStatus, stepName, requiresReason = false) => {
+    if (!selectedRun || actionBusy || !supabase || !isSupabaseConfigured) return;
+    const current = String(selectedRun.status || '').toUpperCase();
+    const allowed = {
+      PENDING: ['DRAFT'],
+      APPROVED: ['PENDING', 'SUBMITTED'],
+      REJECTED: ['PENDING', 'SUBMITTED'],
+      LOCKED: ['APPROVED'],
+    };
+    if (!(allowed[nextStatus] || []).includes(current)) {
+      setActionError(`Không thể chuyển từ trạng thái “${runStatus(current)}” sang “${runStatus(nextStatus)}”.`);
+      setActionMessage('');
+      return;
+    }
+    const note = actionNote.trim();
+    if (requiresReason && !note) {
+      setActionError('Vui lòng nhập lý do từ chối để lưu vào lịch sử duyệt.');
+      setActionMessage('');
+      return;
+    }
+    setActionBusy(true); setActionError(''); setActionMessage('');
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const actorId = authData?.user?.id;
+      if (!actorId) throw new Error('Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.');
+
+      // Compare-and-set prevents two reviewers from silently overwriting one another.
+      const { data: updatedRun, error: updateError } = await supabase
+        .from('payroll_runs').update({ status: nextStatus })
+        .eq('id', selectedRun.id).eq('status', selectedRun.status).select('*').maybeSingle();
+      if (updateError) throw updateError;
+      if (!updatedRun) throw new Error('Trạng thái đã thay đổi hoặc tài khoản không có quyền thao tác. Hãy làm mới hồ sơ trước khi tiếp tục.');
+
+      const { error: historyError } = await supabase.from('payroll_approvals').insert({
+        payroll_run_id: selectedRun.id,
+        payroll_period_id: selectedRun.payroll_period_id,
+        step_name: stepName,
+        status: nextStatus,
+        note: note || null,
+        actor_id: actorId,
+      });
+      setRuns(currentRuns => currentRuns.map(run => run.id === updatedRun.id ? updatedRun : run));
+      setActionNote('');
+      if (historyError) {
+        setActionError(`Đã cập nhật trạng thái thành “${runStatus(nextStatus)}” nhưng chưa ghi được lịch sử duyệt: ${errorText(historyError)}. Cần kiểm tra quyền/bảng payroll_approvals.`);
+      } else {
+        setActionMessage(`Đã chuyển hồ sơ sang “${runStatus(nextStatus)}” và ghi lịch sử xử lý.`);
+      }
+      await load();
+    } catch (e) {
+      setActionError(`Không thể xử lý hồ sơ: ${errorText(e)}`);
+      setActionMessage('');
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const filteredRuns = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('vi');
@@ -196,7 +260,7 @@ export default function Page() {
       return;
     }
     const headers = exportKeys.map(key => `<th>${escapeHtml(snapshotLabel(key))}</th>`).join('');
-    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric ' : ''}${key === 'net_pay' ? 'net-pay' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
+    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
     const totalKeys = exportKeys.filter(key => !['employee_code','employee_name'].includes(key));
     const totalLabelCount = exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length;
     const totals = totalKeys.map(key => {
@@ -204,41 +268,26 @@ export default function Page() {
       const total = filteredResultRows.reduce((sum,row) => sum + (Number(row?.[key]) || 0), 0);
       return `<td class="numeric">${escapeHtml(displayValue(total,key))}</td>`;
     }).join('');
-    const title = `${periodName(selectedPeriod)} - BẢNG LƯƠNG`;
+    const title = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#172b3a;margin:0;font-size:9pt;font-synthesis:none;-webkit-font-smoothing:antialiased}
-h1{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:15pt;margin:0 0 3mm}h2{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:11pt;margin:0 0 2mm}p{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8pt;color:#52677a;margin:0 0 1mm}
+@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
+h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}p{font-size:8pt;color:#52677a;margin:0 0 1mm}
 .meta{display:flex;gap:7mm;flex-wrap:wrap;margin:3mm 0 6mm;font-size:8pt}
 table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
 th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
 th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-td.net-pay{font-size:10pt;font-weight:800;color:#102d4a}
-tr{break-inside:avoid}
+td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-.approval-footer{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5mm;align-items:stretch;margin-top:6mm;page-break-inside:avoid;break-inside:avoid;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif}
-.confirmation{width:auto;min-width:0;max-width:none;border:1.5px dashed #9aaabd;border-radius:3mm;background:#f8faff;padding:3mm 3.5mm;margin:0;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:7pt;line-height:1.3;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
-.confirmation-heading{display:flex;align-items:center;gap:1.5mm;color:#3265a0;font-weight:700;font-size:9pt;letter-spacing:0;margin-bottom:1.5mm}
-.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:12pt;font-weight:700;line-height:1}
-.confirmation-time{display:block;color:#172b3a;font-weight:700;font-size:7.5pt;margin-bottom:1mm;white-space:normal}
-.signature-block{min-width:0;text-align:center;display:flex;flex-direction:column;align-items:center;padding-top:2mm}
-.signature-title{font-weight:600;font-size:9pt;text-transform:none}
-.signature-name{font-weight:700;margin-top:auto;padding-top:19mm;font-size:9pt}
-@media screen{.approval-footer{grid-template-columns:repeat(3,minmax(0,1fr))}.confirmation{width:auto;min-width:0;max-width:none}}
-@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
-</style></head><body>
-<header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
+@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}button{margin-bottom:8mm;padding:8px 12px}}
+</style></head><body><button onclick="window.print()">In / Lưu PDF</button>
+<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>${escapeHtml(title)}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
-<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
+<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
 <div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
-<section class="approval-footer">
-  <div class="confirmation"><div class="confirmation-heading"><span class="confirmation-check">✓</span><span>XÁC NHẬN HỆ THỐNG</span></div><span class="confirmation-time">Thời gian in: ${escapeHtml(new Date().toLocaleTimeString('vi-VN'))} ${escapeHtml(new Date().toLocaleDateString('vi-VN'))}</span>Tài liệu được tổng hợp chi tiết trực tiếp từ hệ thống VIỆT ÂU PAYROLL.<br>Thông tin thể hiện theo dữ liệu ghi nhận tại thời điểm in.</div>
-  <div class="signature-block"><div class="signature-title">Người lập</div><div class="signature-name">PHẠM MINH TÂM</div></div>
-  <div class="signature-block"><div class="signature-title">Duyệt Bảng Lương</div><div class="signature-name">NGUYỄN CƯỜNG</div></div>
-</section>
-</body></html>`;
+<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Ngày xuất: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
+<script>window.addEventListener('load',()=>window.print());</script></body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
       setExportError('Trình duyệt đã chặn cửa sổ in. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.');
@@ -259,7 +308,7 @@ footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-si
 
     {error && <div className="pa-alert error"><AlertTriangle size={17} /><div><strong>Không tải được hồ sơ</strong><p>{error}</p></div></div>}
     {approvalWarning && <div className="pa-alert warning"><AlertTriangle size={17} /><div><strong>Lịch sử trình duyệt chưa đầy đủ</strong><p>{approvalWarning}</p></div></div>}
-    <div className="pa-note"><ShieldCheck size={18} /><div><strong>Chế độ an toàn — chỉ đọc</strong><p>Màn hình này không tự tính lại lương, không tạo phiên bản lương và không thay đổi trạng thái duyệt. Các thao tác phê duyệt chỉ được bổ sung khi quyền và chuyển trạng thái được bảo đảm ở phía Supabase/backend.</p></div></div>
+    <div className="pa-note"><ShieldCheck size={18} /><div><strong>Hồ sơ lương đã lưu — không tính lại</strong><p>Trình duyệt chỉ thay đổi trạng thái của phiên bản và ghi lịch sử thao tác. Snapshot lương đã lưu được giữ nguyên. Quyền thao tác vẫn do Supabase RLS kiểm soát; nếu tài khoản không đủ quyền, hệ thống sẽ hiển thị lỗi.</p></div></div>
 
     <section className="pa-toolbar">
       <label>Kỳ Lương<select value={periodId} onChange={event => setPeriodId(event.target.value)}><option value="ALL">Tất cả kỳ lương</option>{periods.map(period => <option key={period.id} value={period.id}>{periodName(period)}</option>)}</select></label>
@@ -286,6 +335,23 @@ footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-si
     {selectedRun && <section className="pa-card pa-detail">
       <div className="pa-card-heading"><div><div className="pa-eyebrow">CHI TIẾT HỒ SƠ</div><h3>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h3><p>Trạng thái phiên bản: <strong>{runStatus(selectedRun.status)}</strong></p></div><span className={`pa-status ${statusClass(selectedRun.status)}`}>{runStatus(selectedRun.status)}</span></div>
       <div className="pa-info-grid"><div><span>Mã kỳ lương</span><strong>{selectedPeriod?.period_code || selectedPeriod?.code || '—'}</strong></div><div><span>Thời điểm tính</span><strong>{dateTime(selectedRun.calculated_at)}</strong></div><div><span>Phiên bản công thức</span><strong>{selectedRun.formula_version || '—'}</strong></div><div><span>Số dòng kết quả trong snapshot</span><strong>{resultRows.length || 'Chưa xác định'}</strong></div></div>
+      <section className="pa-workflow-panel">
+        <div className="pa-workflow-copy"><h4>Xử lý hồ sơ lương</h4><p>Thao tác áp dụng cho Run #{selectedRun.run_number ?? '—'} đang chọn, không thay đổi số tiền trong snapshot.</p></div>
+        <label className="pa-workflow-note">Ghi chú / lý do từ chối<textarea value={actionNote} onChange={event=>setActionNote(event.target.value)} rows={2} placeholder="Nhập ghi chú; bắt buộc khi từ chối..." disabled={actionBusy || ['APPROVED','LOCKED','CANCELLED'].includes(String(selectedRun.status||'').toUpperCase())}/></label>
+        <div className="pa-workflow-actions">
+          {String(selectedRun.status).toUpperCase()==='DRAFT' && <button className="pa-button primary" onClick={()=>transitionRun('PENDING','Kế toán trình duyệt')} disabled={actionBusy}><Send size={15}/> Trình duyệt</button>}
+          {['PENDING','SUBMITTED'].includes(String(selectedRun.status).toUpperCase()) && <>
+            <button className="pa-button approve" onClick={()=>transitionRun('APPROVED','Sếp duyệt')} disabled={actionBusy}><CheckCircle2 size={15}/> Duyệt lương</button>
+            <button className="pa-button reject" onClick={()=>transitionRun('REJECTED','Sếp từ chối',true)} disabled={actionBusy}><XCircle size={15}/> Từ chối</button>
+          </>}
+          {String(selectedRun.status).toUpperCase()==='APPROVED' && <button className="pa-button primary" onClick={()=>transitionRun('LOCKED','Khóa phiên bản lương')} disabled={actionBusy}><LockKeyhole size={15}/> Khóa phiên bản lương</button>}
+          {String(selectedRun.status).toUpperCase()==='REJECTED' && <p className="pa-workflow-hint">Phiên bản đã từ chối được giữ nguyên để tra cứu. Hãy quay lại Tính Lương, tạo phiên bản mới sau khi chỉnh dữ liệu; không sửa snapshot đã bị từ chối.</p>}
+          {String(selectedRun.status).toUpperCase()==='LOCKED' && <p className="pa-workflow-hint">Phiên bản đã khóa. Không cho phép thay đổi trạng thái hoặc snapshot từ màn hình này.</p>}
+          {actionBusy && <span className="pa-workflow-busy"><RefreshCw size={14} className="pa-spin"/> Đang xử lý...</span>}
+        </div>
+        {actionError && <div className="pa-alert error"><AlertTriangle size={16}/><div><strong>Chưa hoàn tất thao tác</strong><p>{actionError}</p></div></div>}
+        {actionMessage && <div className="pa-alert"><CheckCircle2 size={16}/><div><strong>Đã xử lý hồ sơ</strong><p>{actionMessage}</p></div></div>}
+      </section>
       <section className="pa-export-panel">
          <div className="pa-export-heading"><div><h4>Xuất PDF / Bản in</h4><p>Xuất từ snapshot của phiên bản đang chọn; không tính lại lương. Chọn thành phần cần đưa vào bảng.</p></div>
            <button className="pa-button secondary" onClick={printSnapshot} disabled={!resultRows.length}><Printer size={15}/> Xuất PDF / In</button>
@@ -313,6 +379,6 @@ footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-si
          <footer><span>Tổng số nhân sự: {resultRows.length}</span><span>Phiên bản công thức: {selectedRun.formula_version || '—'}</span><span>Xuất từ snapshot đã lưu · Không tính lại lương</span></footer>
        </div>
     </section>}
-    <p className="pa-footnote"><AlertTriangle size={14} /> Chưa bật nút trình duyệt/duyệt/từ chối ở giao diện vì cần xác nhận cơ chế phân quyền theo vai trò và chuyển trạng thái ở backend. RLS hiện tại chỉ kiểm tra quyền vận hành chung ở một số thao tác, chưa đủ bằng chứng để bảo đảm đúng vai trò Kế toán và Sếp.</p>
+    <p className="pa-footnote"><AlertTriangle size={14} /> Các nút chỉ xuất hiện theo trạng thái hợp lệ của phiên bản. Quyền thực tế phụ thuộc chính sách Supabase RLS; giao diện không tự cấp quyền Kế toán hoặc người duyệt. Nếu RLS chưa cho phép cập nhật payroll_runs hoặc thêm payroll_approvals, cần cấu hình quyền ở backend trước khi dùng chính thức.</p>
   </main>;
 }

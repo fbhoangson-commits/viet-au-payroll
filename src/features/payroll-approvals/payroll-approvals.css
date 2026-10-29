@@ -69,3 +69,19 @@
 .pa-employee-filters input,.pa-employee-filters select{width:100%;min-width:0;border:1px solid #d8e2eb;border-radius:7px;background:white;padding:8px 9px;color:#183a55;font:inherit}
 @media(max-width:850px){.pa-employee-filters{grid-template-columns:1fr 1fr}.pa-employee-filters label:first-child{grid-column:1/-1}}
 @media(max-width:620px){.pa-employee-filters{grid-template-columns:1fr}.pa-employee-filters label:first-child{grid-column:auto}}
+
+
+/* Payroll approval workflow controls; preserve existing detail/print styles. */
+.pa-button.primary{background:#117f7b;color:#fff;border-color:#117f7b}
+.pa-button.primary:hover:not(:disabled){background:#0d6d69}
+.pa-button.approve{background:#e8f7ef;color:#167447;border-color:#bfe6cf}
+.pa-button.reject{background:#fff0ef;color:#ad3935;border-color:#f0c9c5}
+.pa-workflow-panel{display:grid;gap:12px;margin:0 0 18px;padding:14px;border:1px solid #d9e8ed;border-radius:10px;background:#fbfdfd}
+.pa-workflow-copy h4{font-size:12px;color:#24465f;margin:0 0 4px}
+.pa-workflow-copy p,.pa-workflow-hint{font-size:10px;line-height:1.6;color:#6c8190;margin:0}
+.pa-workflow-note{display:flex;flex-direction:column;gap:5px;font-size:10px;font-weight:700;color:#52687a}
+.pa-workflow-note textarea{width:100%;resize:vertical;min-height:54px;border:1px solid #d9e4ed;border-radius:8px;background:#fff;padding:9px 10px;color:#29465d;font:inherit;font-size:11px;line-height:1.5}
+.pa-workflow-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pa-workflow-busy{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#6d8291}
+.pa-workflow-hint{flex-basis:100%;padding:9px 11px;border-radius:7px;background:#f1f5f7}
+@media(max-width:620px){.pa-workflow-actions{align-items:stretch}.pa-workflow-actions .pa-button{flex:1}}
