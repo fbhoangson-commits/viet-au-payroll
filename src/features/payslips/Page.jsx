@@ -74,27 +74,41 @@ function buildPayBreakdown({row,period,groups,columns,rateValues,teachingRecords
     .forEach(x=>fixedRows.push({...x,configured:true}));
 
   const records=(teachingRecords||[]).filter(r=>clean(r.period_id)===clean(period?.id)&&((id&&clean(r.employee_id)===id)||(code&&clean(r.employee_code||r.employee_code_snapshot).toLocaleUpperCase('vi')===code)));
-  const teachingRows=records.map(rec=>{
-    const col=selectedColumns.find(c=>clean(c.id)===clean(rec.salary_rate_column_id));
-    if(!col)return null;
-    const rate=rateForColumn(rateValues,clean(rec.employee_id)||id,col.group_id,col,policyId);
-    const quantity=num(rec.lesson_count),group=groupById.get(clean(col.group_id));
+  const categoryForGroup=group=>{
+    const g=norm(`${group?.code||''} ${group?.name||''}`);
+    if(g.includes('tutoring')||g.includes('phu dao'))return 'tutoring';
+    if(g.includes('other')||g.includes('khac'))return 'other';
+    if(g.includes('teaching')||g.includes('tiet day'))return 'teaching';
+    return '';
+  };
+  // Use the same period-scoped source as Dữ Liệu Kỳ Lương > Chấm Công Tiết Dạy.
+  // Build each configured column even when its attendance is zero/missing (the module treats missing as 0).
+  const teachingRows=selectedColumns.filter(c=>categoryForGroup(groupById.get(clean(c.group_id)))).map(col=>{
+    const group=groupById.get(clean(col.group_id));
+    const matchingRecords=records.filter(rec=>clean(rec.salary_rate_column_id)===clean(col.id));
+    const quantity=matchingRecords.reduce((sum,rec)=>sum+num(rec.lesson_count),0);
+    const rate=rateForColumn(rateValues,id,col.group_id,col,policyId);
     const label=clean(col.name||col.label||col.code||'');
-    const combined=norm(`${label} ${group?.code||''} ${group?.name||''}`);
-    let category='teaching';
-    if(combined.includes('phu dao')||/\bpd\b/.test(combined))category='tutoring';
-    else if(['khac','other','ielts','coi thi','tro giang','coi thi tro giang'].some(k=>combined.includes(norm(k))))category='other';
-    return {name:label||'Chưa đặt tên',quantity,rate,amount:rate===null?null:Math.round(quantity*rate),groupCode:norm(`${group?.code||''} ${group?.name||''}`),combined,unit:clean(rec.unit||rec.unit_name||'tiết'),category};
-  }).filter(Boolean);
-  const mapRows=(category,definitions)=>{const used=new Set();return definitions.map(def=>{
-    const matches=teachingRows.filter(x=>x.category===category&&!used.has(x)&&def.keys.some(k=>x.combined.includes(norm(k))));
-    matches.forEach(x=>used.add(x));
-    return {name:def.label,quantity:matches.reduce((n,x)=>n+x.quantity,0),rate:matches.length===1?matches[0].rate:null,amount:matches.length&&matches.every(x=>x.amount!==null)?matches.reduce((n,x)=>n+num(x.amount),0):null,unit:'tiết',configured:matches.length>0,details:matches};
-  });};
-  const extraRows=(category,definitions,usedLabels)=>teachingRows.filter(x=>x.category===category&&!definitions.some(def=>def.keys.some(k=>x.combined.includes(norm(k)))));
+    const category=categoryForGroup(group);
+    const combined=norm(`${label} ${col.code||''}`);
+    return {name:label||'Chưa đặt tên',quantity,rate,amount:rate===null?null:Math.round(quantity*rate),groupCode:norm(`${group?.code||''} ${group?.name||''}`),combined,unit:'tiết',category,configured:true,column:col};
+  });
+  const mapRows=(category,definitions)=>{
+    const used=new Set();
+    return definitions.map(def=>{
+      const matches=teachingRows.filter(x=>x.category===category&&!used.has(x)&&def.keys.some(k=>x.combined.includes(norm(k))));
+      matches.forEach(x=>used.add(x));
+      const amountKnown=matches.length>0&&matches.every(x=>x.rate!==null&&x.amount!==null);
+      return {name:def.label,quantity:matches.reduce((n,x)=>n+x.quantity,0),rate:matches.length===1?matches[0].rate:null,amount:amountKnown?matches.reduce((sum,x)=>sum+num(x.amount),0):null,unit:'tiết',configured:matches.length>0&&matches.every(x=>x.rate!==null),details:matches};
+    });
+  };
+  const extraRows=(category,definitions)=>{
+    const usedKeys=definitions.flatMap(def=>def.keys.map(norm));
+    return teachingRows.filter(x=>x.category===category&&!usedKeys.some(k=>x.combined.includes(k))).map(x=>({...x,configured:x.rate!==null}));
+  };
   const teachingDefs=[{label:'Khối 10',keys:['k10','khoi 10','khoi10']},{label:'Khối 11',keys:['k11','khoi 11','khoi11']},{label:'Khối 12',keys:['k12','khoi 12','khoi12']}];
-  const tutoringDefs=[{label:'Chiều',keys:['chieu','pd chieu']},{label:'Tối',keys:['toi','pd toi']},{label:'Thứ 7',keys:['thu 7','thu bay','t7']},{label:'Chủ Nhật',keys:['chu nhat','chu nhat','cn']}];
-  const otherDefs=[{label:'Coi Thi',keys:['coi thi']},{label:'IELTS',keys:['ielts']},{label:'Trợ Giảng',keys:['tro giang','tro giang']}];
+  const tutoringDefs=[{label:'Chiều',keys:['chieu','pd chieu']},{label:'Tối',keys:['toi','pd toi']},{label:'Thứ 7',keys:['thu 7','thu bay','t7','thu7']},{label:'Chủ Nhật',keys:['chu nhat','cn']}];
+  const otherDefs=[{label:'Coi Thi',keys:['coi thi','coithi']},{label:'IELTS',keys:['ielts']},{label:'Trợ Giảng',keys:['tro giang','trogiang']}];
   const teachingGroup={title:'2. LƯƠNG TIẾT DẠY',rows:[...mapRows('teaching',teachingDefs),...extraRows('teaching',teachingDefs)]};
   const tutoringGroup={title:'3. LƯƠNG PHỤ ĐẠO',rows:[...mapRows('tutoring',tutoringDefs),...extraRows('tutoring',tutoringDefs)]};
   const otherGroup={title:'4. LƯƠNG DẠY KHÁC',rows:[...mapRows('other',otherDefs),...extraRows('other',otherDefs)]};
@@ -122,7 +136,7 @@ function printHtml({run,period,row,adds,deducts,approvals,breakdown}) {
   const totalDed=['deductions','insurance_employee','union_employee','personal_income_tax'].some(k=>row[k]!==null&&row[k]!==undefined&&row[k]!=='')?num(row.deductions)+num(row.insurance_employee)+num(row.union_employee)+num(row.personal_income_tax):null;
   const timestamp=new Date().toLocaleString('vi-VN');
   const month=period?.month||period?.period_code||period?.code||periodTitle(period);
-  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>PHIEU_LUONG_${escapeHtml(period?.code||period?.period_code||run.payroll_period_id)}_${escapeHtml(codeOf(row))}</title><style>@page{size:A4;margin:12mm 12mm}*{box-sizing:border-box}body{font:12px Arial,"DejaVu Sans",sans-serif;color:#17324a}.net td,.net strong{font-family:Arial,Helvetica,sans-serif!important;font-style:normal!important;font-weight:800;letter-spacing:0!important;text-transform:uppercase}h1{text-align:center;font-size:19px;margin:0 0 5px}h2{text-align:center;font-size:15px;margin:0 0 12px}h3{font-size:12px;margin:13px 0 6px;color:#174766}h4{font-size:11px;margin:8px 0 4px;color:#174766}.sub{text-align:center;color:#5e7488;font-size:9px;margin-bottom:12px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;border:1px solid #b8c8d7;padding:8px 10px;margin:8px 0 10px}.meta span{color:#61768a}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #9eafbf;padding:5px 6px;vertical-align:top}th{background:#edf3f8;text-align:left}.num{text-align:right;white-space:nowrap}.empty{text-align:center;color:#667b8d;padding:10px}.section-total{font-weight:bold;background:#d8edf2}.total{font-weight:bold;background:#edf3f8}.net{font-weight:bold;font-size:14px;background:#d9efed}.words{font-style:italic;font-size:11px;margin:5px 0 10px}.sign{display:grid;grid-template-columns:1fr 1fr;text-align:center;margin-top:18px;break-inside:avoid;font-weight:bold}.sign .name{margin-top:18px}.system-confirm{border:1px dashed #8ba9c7;border-radius:8px;padding:9px 12px;margin-top:15px;background:#f8fbff;break-inside:avoid;font-size:10px;color:#355779}.system-confirm strong{display:block;font-size:11px;margin-bottom:4px;color:#214b70}.footer{text-align:center;color:#6d8091;font-size:9px;margin-top:8px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>PHIẾU LƯƠNG THÁNG ${escapeHtml(month)}</h2><div class="sub">Trích xuất từ hệ thống VIỆT ÂU PAYROLL</div><div class="meta"><div><span>Họ và tên:</span> <b>${escapeHtml(nameOf(row))}</b></div><div><span>Mã nhân viên:</span> <b>${escapeHtml(codeOf(row)||'—')}</b></div><div><span>Phân loại:</span> <b>${escapeHtml(first(row,['classification','employee_type']))}</b></div><div><span>Phòng ban:</span> <b>${escapeHtml(first(row,['department','department_name']))}</b></div><div><span>Kỳ lương:</span> <b>${escapeHtml(periodTitle(period))}</b></div><div><span>Mã kỳ lương:</span> <b>${escapeHtml(period?.code||period?.period_code||run.payroll_period_id||'—')}</b></div><div><span>Thời điểm tính:</span> <b>${escapeHtml(dt(run.calculated_at||run.created_at))}</b></div><div><span>Chức vụ:</span> <b>${escapeHtml(first(row,['position','job_title']))}</b></div></div><h3>A. TỔNG HỢP THU NHẬP</h3><table><thead><tr><th>Nội dung</th><th class="num">Thành tiền</th></tr></thead><tbody>
+  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>PHIEU_LUONG_${escapeHtml(period?.code||period?.period_code||run.payroll_period_id)}_${escapeHtml(codeOf(row))}</title><style>@page{size:A4;margin:12mm 12mm}*{box-sizing:border-box}body{font:12px Arial,"DejaVu Sans",sans-serif;color:#17324a}.net td,.net strong{font-family:Arial,"Liberation Sans",sans-serif!important;font-style:normal!important;font-weight:800;letter-spacing:0!important;font-variant-ligatures:none!important;font-feature-settings:normal!important;text-transform:none!important}h1{text-align:center;font-size:19px;margin:0 0 5px}h2{text-align:center;font-size:15px;margin:0 0 12px}h3{font-size:12px;margin:13px 0 6px;color:#174766}h4{font-size:11px;margin:8px 0 4px;color:#174766}.sub{text-align:center;color:#5e7488;font-size:9px;margin-bottom:12px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;border:1px solid #b8c8d7;padding:8px 10px;margin:8px 0 10px}.meta span{color:#61768a}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #9eafbf;padding:5px 6px;vertical-align:top}th{background:#edf3f8;text-align:left}.num{text-align:right;white-space:nowrap}.empty{text-align:center;color:#667b8d;padding:10px}.section-total{font-weight:bold;background:#d8edf2}.total{font-weight:bold;background:#edf3f8}.net{font-weight:bold;font-size:14px;background:#d9efed}.words{font-style:italic;font-size:11px;margin:5px 0 10px}.sign{display:grid;grid-template-columns:1fr 1fr;text-align:center;margin-top:18px;break-inside:avoid;font-weight:bold}.sign .name{margin-top:18px}.system-confirm{border:1px dashed #8ba9c7;border-radius:8px;padding:9px 12px;margin-top:15px;background:#f8fbff;break-inside:avoid;font-size:10px;color:#355779}.system-confirm strong{display:block;font-size:11px;margin-bottom:4px;color:#214b70}.footer{text-align:center;color:#6d8091;font-size:9px;margin-top:8px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>PHIẾU LƯƠNG THÁNG ${escapeHtml(month)}</h2><div class="sub">Trích xuất từ hệ thống VIỆT ÂU PAYROLL</div><div class="meta"><div><span>Họ và tên:</span> <b>${escapeHtml(nameOf(row))}</b></div><div><span>Mã nhân viên:</span> <b>${escapeHtml(codeOf(row)||'—')}</b></div><div><span>Phân loại:</span> <b>${escapeHtml(first(row,['classification','employee_type']))}</b></div><div><span>Phòng ban:</span> <b>${escapeHtml(first(row,['department','department_name']))}</b></div><div><span>Kỳ lương:</span> <b>${escapeHtml(periodTitle(period))}</b></div><div><span>Mã kỳ lương:</span> <b>${escapeHtml(period?.code||period?.period_code||run.payroll_period_id||'—')}</b></div><div><span>Thời điểm tính:</span> <b>${escapeHtml(dt(run.calculated_at||run.created_at))}</b></div><div><span>Chức vụ:</span> <b>${escapeHtml(first(row,['position','job_title']))}</b></div></div><h3>A. TỔNG HỢP THU NHẬP</h3><table><thead><tr><th>Nội dung</th><th class="num">Thành tiền</th></tr></thead><tbody>
 <tr class="section-total"><td>1. LƯƠNG CỐ ĐỊNH</td><td class="num">${escapeHtml(money(first(row,['fixed','fixed_salary','base_salary'],null)))}</td></tr>
 <tr><td colspan="2"><table><thead><tr><th>Nội dung chi tiết</th><th class="num">Thành tiền</th></tr></thead><tbody>${detailTable((breakdown?.fixedRows||[]),'Chưa có dữ liệu chi tiết lương cố định.')}</tbody></table></td></tr>
 ${(breakdown?.teachingGroups||[]).map((section,idx)=>{const complete=section.rows.length>0&&section.rows.every(x=>x.configured&&x.amount!==null);const subtotal=complete?section.rows.reduce((sum,x)=>sum+num(x.amount),0):null;const label=section.title.replace(/^\d+\.\s*/, '');const details=section.rows.map(x=>({...x,name:x.name,quantity:x.quantity,rate:x.rate,amount:x.amount}));const body=details.length?details.map(x=>`<tr><td>${escapeHtml(x.name)}</td><td class="num">${x.configured?escapeHtml(x.quantity):'—'}</td><td class="num">${x.rate===null||x.rate===undefined?'—':escapeHtml(money(x.rate))}</td><td class="num">${x.amount===null||x.amount===undefined?'Chưa có dữ liệu':escapeHtml(money(x.amount))}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">Chưa có dữ liệu chi tiết cho nhóm này.</td></tr>`;return `<tr class="section-total"><td>${escapeHtml(section.title)}</td><td class="num">${subtotal===null?'Chưa đủ dữ liệu':escapeHtml(money(subtotal))}</td></tr><tr><td colspan="2"><table><thead><tr><th>Nội dung chi tiết</th><th class="num">Số tiết</th><th class="num">Đơn giá</th><th class="num">Thành tiền</th></tr></thead><tbody>${body}<tr class="total"><td colspan="3">TỔNG ${escapeHtml(label.replace(/^\d+\.\s*/,''))}</td><td class="num">${subtotal===null?'Chưa đủ dữ liệu':escapeHtml(money(subtotal))}</td></tr></tbody></table></td></tr>`;}).join('')}
