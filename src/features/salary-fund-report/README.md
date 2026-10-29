@@ -1,10 +1,8 @@
 # Báo cáo quỹ lương
 
-Thư mục độc lập cho tính năng `salary-fund-report`.
+Module đọc dữ liệu từ `payroll_periods`, `payroll_runs`, `payroll_approvals` và `employees` hiện có. Chỉ đọc dữ liệu snapshot; không ghi, tính lại hoặc thay đổi trạng thái lương.
 
-- `Page.jsx`: màn hình chính của tính năng.
-- `components/`: các thành phần chỉ dùng trong tính năng này.
-- `services/`: truy vấn và xử lý dữ liệu riêng.
-- `styles/`: CSS riêng của tính năng.
-
-Hiện tại đây là khung trắng, chưa kết nối dữ liệu và chưa thực hiện import.
+- Chọn kỳ và phiên bản để xem báo cáo chi tiết.
+- Khoảng kỳ so sánh ưu tiên phiên bản `APPROVED`/`LOCKED`; nếu không có, dùng phiên bản mới nhất và hiển thị cảnh báo.
+- Tất cả truy vấn lớn được phân trang theo lô 1.000 dòng.
+- Không có migration/schema mới trong bản vá.
