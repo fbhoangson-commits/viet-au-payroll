@@ -75,6 +75,37 @@ function firstDefined(row, keys) {
 }
 function rowPeriodId(r) { return clean(r?.period_id); }
 function employeeId(r) { return clean(r?.employee_id); }
+function teachingRecordMatchesPeriod(record, period) {
+  const id = clean(period?.id);
+  const code = clean(period?.period_code || period?.code);
+  const refs = [
+    record?.period_id, record?.payroll_period_id, record?.payroll_period,
+    record?.period_code, record?.payroll_period_code
+  ].map(clean).filter(Boolean);
+  if (!refs.length) return false;
+  return refs.some(ref => ref === id || (code && ref.toLocaleUpperCase('vi') === code.toLocaleUpperCase('vi')));
+}
+function teachingRecordMatchesEmployee(record, employee, code) {
+  const targetId = clean(employee);
+  const targetCode = clean(code).toLocaleUpperCase('vi');
+  const recordId = clean(record?.employee_id || record?.staff_id);
+  const recordCode = clean(record?.employee_code || record?.employee_code_snapshot || record?.code || record?.staff_code).toLocaleUpperCase('vi');
+  return Boolean((targetId && recordId && targetId === recordId) || (targetCode && recordCode && targetCode === recordCode));
+}
+function resolveTeachingColumn(record, columns, columnsById) {
+  const refs = [
+    record?.salary_rate_column_id, record?.salary_rate_column_code,
+    record?.salary_rate_column_name, record?.column_id, record?.column_code,
+    record?.column_name, record?.salary_column_id, record?.salary_column_code
+  ].map(clean).filter(Boolean);
+  for (const ref of refs) {
+    const exact = columnsById.get(ref);
+    if (exact) return exact;
+    const match = columns.find(c => [c.id, c.code, c.name, c.label].some(value => clean(value) && norm(value) === norm(ref)));
+    if (match) return match;
+  }
+  return null;
+}
 function isActiveAdjustment(r) { return !['CANCELLED','CANCELED','INACTIVE','ĐÃ HỦY','DA HUY'].includes(String(r?.status||'').toUpperCase()); }
 function firstText(...values) { return values.find(v => v !== null && v !== undefined && String(v).trim() !== '') ?? ''; }
 function fieldFromObject(obj, candidates) {
@@ -174,7 +205,7 @@ export default function PayrollCalculationPage({ page }) {
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
       const teachingColumns = selectedRateColumns.filter(isTeachingColumn);
       const dynamicLabels = Object.fromEntries([...fixedColumns.map(c=>[`fixedCol_${c.id}`,clean(c.name||c.label||c.code||'Cấu phần lương')]),...teachingColumns.map(c=>[`lesson_${c.id}`,clean(c.name||c.label||c.code||'Cột tiết')])]);
-      const periodTeaching=teachingRecords.filter(r=>rowPeriodId(r)===selectedId);
+      const periodTeaching=teachingRecords.filter(r=>teachingRecordMatchesPeriod(r,selectedPeriod));
       const periodAdjustments=adjustments.filter(r=>String(r.status||'ACTIVE').toUpperCase()==='ACTIVE');
       const periodMonth=String(selectedPeriod.month||selectedPeriod.start_date||`${selectedPeriod.period_year||''}-${String(selectedPeriod.period_month||'').padStart(2,'0')}`).slice(0,7);
       const appliesAdjustment=r=>{const app=String(r.application_type||'PER_PERIOD').toUpperCase();if(app==='PER_PERIOD')return rowPeriodId(r)===selectedId;if(app==='FIXED'){const from=String(r.effective_from||'').slice(0,7),to=String(r.effective_to||'').slice(0,7);return Boolean(periodMonth&&from&&from<=periodMonth&&(!to||to>=periodMonth));}return false;};
@@ -226,24 +257,11 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
+        const lessons=periodTeaching.filter(r=>teachingRecordMatchesEmployee(r,id,code));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
-          // Resolve the saved column reference using ID first, then historical code/name/label.
-          // Older records can keep a code or column name instead of the current UUID.
-          const rawColumnRef = clean(
-            rec.salary_rate_column_id ||
-            rec.salary_rate_column_code ||
-            rec.salary_rate_column_name ||
-            rec.column_code ||
-            rec.column_name
-          );
-          const col = columnsById.get(rawColumnRef) || columns.find(c =>
-            [c.id, c.code, c.name, c.label].some(value =>
-              clean(value) && norm(value) === norm(rawColumnRef)
-            )
-          );
+          const col=resolveTeachingColumn(rec,columns,columnsById);
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
@@ -314,10 +332,7 @@ export default function PayrollCalculationPage({ page }) {
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
-        if(lessons.some(r=>{
-          const ref=clean(r.salary_rate_column_id||r.salary_rate_column_code||r.salary_rate_column_name||r.column_code||r.column_name);
-          return !(columnsById.get(ref) || columns.find(c=>[c.id,c.code,c.name,c.label].some(value=>clean(value)&&norm(value)===norm(ref))));
-        })) status.push('Có tiết chưa khớp cấu hình');
+        if(lessons.some(r=>!resolveTeachingColumn(r,columns,columnsById))) status.push('Có tiết chưa khớp cấu hình');
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
         if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
         if(!classification) status.push('Chưa cập nhật phân loại');
