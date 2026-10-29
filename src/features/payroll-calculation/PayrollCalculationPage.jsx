@@ -42,13 +42,22 @@ const colLabel = {
  participates:'Tham Gia BHXH', taxStatus:'Trạng Thái Thuế', taxMethod:'Phương Pháp Tính Thuế'
 };
 async function fetchRows(table, label, warnings, required=false) {
-  const { data, error } = await supabase.from(table).select('*');
-  if (error) {
-    if (required) throw new Error(`${label}: ${errorText(error)}`);
-    warnings.push(`${label}: chưa đọc được (${errorText(error)})`);
-    return [];
+  // Supabase/PostgREST commonly caps a response at 1,000 rows. Fetch in pages so
+  // later records (including OTHER / Coi Thi / IELTS / Trợ Giảng) are not silently omitted.
+  const all = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from(table).select('*').range(from, from + pageSize - 1);
+    if (error) {
+      if (required) throw new Error(`${label}: ${errorText(error)}`);
+      warnings.push(`${label}: chưa đọc được (${errorText(error)})`);
+      return [];
+    }
+    const batch = data || [];
+    all.push(...batch);
+    if (batch.length < pageSize) break;
   }
-  return data || [];
+  return all;
 }
 function tax5(value) {
   const x=Math.max(0,num(value));
@@ -75,37 +84,6 @@ function firstDefined(row, keys) {
 }
 function rowPeriodId(r) { return clean(r?.period_id); }
 function employeeId(r) { return clean(r?.employee_id); }
-function teachingRecordMatchesPeriod(record, period) {
-  const id = clean(period?.id);
-  const code = clean(period?.period_code || period?.code);
-  const refs = [
-    record?.period_id, record?.payroll_period_id, record?.payroll_period,
-    record?.period_code, record?.payroll_period_code
-  ].map(clean).filter(Boolean);
-  if (!refs.length) return false;
-  return refs.some(ref => ref === id || (code && ref.toLocaleUpperCase('vi') === code.toLocaleUpperCase('vi')));
-}
-function teachingRecordMatchesEmployee(record, employee, code) {
-  const targetId = clean(employee);
-  const targetCode = clean(code).toLocaleUpperCase('vi');
-  const recordId = clean(record?.employee_id || record?.staff_id);
-  const recordCode = clean(record?.employee_code || record?.employee_code_snapshot || record?.code || record?.staff_code).toLocaleUpperCase('vi');
-  return Boolean((targetId && recordId && targetId === recordId) || (targetCode && recordCode && targetCode === recordCode));
-}
-function resolveTeachingColumn(record, columns, columnsById) {
-  const refs = [
-    record?.salary_rate_column_id, record?.salary_rate_column_code,
-    record?.salary_rate_column_name, record?.column_id, record?.column_code,
-    record?.column_name, record?.salary_column_id, record?.salary_column_code
-  ].map(clean).filter(Boolean);
-  for (const ref of refs) {
-    const exact = columnsById.get(ref);
-    if (exact) return exact;
-    const match = columns.find(c => [c.id, c.code, c.name, c.label].some(value => clean(value) && norm(value) === norm(ref)));
-    if (match) return match;
-  }
-  return null;
-}
 function isActiveAdjustment(r) { return !['CANCELLED','CANCELED','INACTIVE','ĐÃ HỦY','DA HUY'].includes(String(r?.status||'').toUpperCase()); }
 function firstText(...values) { return values.find(v => v !== null && v !== undefined && String(v).trim() !== '') ?? ''; }
 function fieldFromObject(obj, candidates) {
@@ -146,9 +124,6 @@ export default function PayrollCalculationPage({ page }) {
   const [search,setSearch] = useState('');
   const [typeFilter,setTypeFilter] = useState('ALL');
   const [dataLoaded,setDataLoaded] = useState(false);
-  const [savingRun,setSavingRun] = useState(false);
-  const [saveRunMessage,setSaveRunMessage] = useState('');
-  const [saveRunError,setSaveRunError] = useState('');
 
   const load = useCallback(async (keepPeriod=true) => {
     if (!isSupabaseConfigured || !supabase) {
@@ -205,7 +180,7 @@ export default function PayrollCalculationPage({ page }) {
       const fixedColumns = selectedRateColumns.filter(isFixedGroup).slice(0,4);
       const teachingColumns = selectedRateColumns.filter(isTeachingColumn);
       const dynamicLabels = Object.fromEntries([...fixedColumns.map(c=>[`fixedCol_${c.id}`,clean(c.name||c.label||c.code||'Cấu phần lương')]),...teachingColumns.map(c=>[`lesson_${c.id}`,clean(c.name||c.label||c.code||'Cột tiết')])]);
-      const periodTeaching=teachingRecords.filter(r=>teachingRecordMatchesPeriod(r,selectedPeriod));
+      const periodTeaching=teachingRecords.filter(r=>rowPeriodId(r)===selectedId);
       const periodAdjustments=adjustments.filter(r=>String(r.status||'ACTIVE').toUpperCase()==='ACTIVE');
       const periodMonth=String(selectedPeriod.month||selectedPeriod.start_date||`${selectedPeriod.period_year||''}-${String(selectedPeriod.period_month||'').padStart(2,'0')}`).slice(0,7);
       const appliesAdjustment=r=>{const app=String(r.application_type||'PER_PERIOD').toUpperCase();if(app==='PER_PERIOD')return rowPeriodId(r)===selectedId;if(app==='FIXED'){const from=String(r.effective_from||'').slice(0,7),to=String(r.effective_to||'').slice(0,7);return Boolean(periodMonth&&from&&from<=periodMonth&&(!to||to>=periodMonth));}return false;};
@@ -257,11 +232,11 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>teachingRecordMatchesEmployee(r,id,code));
+        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
-          const col=resolveTeachingColumn(rec,columns,columnsById);
+          const col=columnsById.get(clean(rec.salary_rate_column_id));
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
@@ -332,7 +307,7 @@ export default function PayrollCalculationPage({ page }) {
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
-        if(lessons.some(r=>!resolveTeachingColumn(r,columns,columnsById))) status.push('Có tiết chưa khớp cấu hình');
+        if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
         if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
         if(!classification) status.push('Chưa cập nhật phân loại');
@@ -348,81 +323,6 @@ export default function PayrollCalculationPage({ page }) {
 
   useEffect(()=>{load(false);},[]);
   useEffect(()=>{if(periodId) load(true);},[periodId]);
-
-  const savePayrollRun = async () => {
-    if (!supabase || !isSupabaseConfigured || !selectedPeriod?.id || !rows.length || savingRun) return;
-    setSavingRun(true); setSaveRunMessage(''); setSaveRunError('');
-    try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      const userId = authData?.user?.id;
-      if (!userId) throw new Error('Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.');
-      const { data: latestRuns, error: latestError } = await supabase
-        .from('payroll_runs').select('run_number')
-        .eq('payroll_period_id', selectedPeriod.id)
-        .order('run_number', { ascending: false }).limit(1);
-      if (latestError) throw latestError;
-      const runNumber = Math.max(0, ...((latestRuns || []).map(r => Number(r.run_number) || 0))) + 1;
-      const calculatedAt = new Date().toISOString();
-      // Persist the already displayed calculation rows as an immutable version snapshot.
-      // This does not re-run formulas or update payroll inputs.
-      const results = rows.map(r => ({
-        employee_id: r.id || null,
-        employee_code: r.code,
-        employee_name: r.name,
-        classification: r.classification || '',
-        department: r.department || '',
-        position: r.position || '',
-        fixed: num(r.fixed), teaching: num(r.teaching),
-        additions: num(r.additions), deductions: num(r.deductions),
-        insurance_employee: num(r.insuranceEmployee),
-        employer_insurance: num(r.employerInsurance),
-        union_employee: num(r.unionEmployee),
-        taxable_income: num(r.taxable), personal_income_tax: num(r.taxAmount),
-        gross_income: num(r.gross), net_pay: num(r.net),
-        lesson_count: num(r.lessonCount),
-        status: r.status || '',
-      }));
-      const inputSnapshot = {
-        schema_version: 1,
-        period: {
-          id: selectedPeriod.id,
-          period_code: selectedPeriod.period_code || selectedPeriod.code || '',
-          name: periodTitle(selectedPeriod),
-          month: selectedPeriod.month || selectedPeriod.period_month || null,
-          year: selectedPeriod.period_year || null,
-        },
-        calculated_at: calculatedAt,
-        calculated_by: userId,
-        totals: {
-          employee_count: rows.length,
-          fixed: num(totals.fixed), teaching: num(totals.teaching),
-          additions: num(totals.additions), deductions: num(totals.deductions),
-          insurance_employee: num(totals.insuranceEmployee),
-          employer_insurance: num(totals.employerInsurance),
-          union_employee: num(totals.unionEmployee),
-          taxable_income: num(totals.taxable), personal_income_tax: num(totals.taxAmount),
-          gross_income: num(totals.gross), net_pay: num(totals.net),
-        },
-        results,
-      };
-      const { data: inserted, error: insertError } = await supabase.from('payroll_runs').insert({
-        payroll_period_id: selectedPeriod.id,
-        run_number: runNumber,
-        status: 'DRAFT',
-        formula_version: 'payroll-calculation-ui-v1',
-        input_snapshot: inputSnapshot,
-        calculated_by: userId,
-        calculated_at: calculatedAt,
-      }).select('id, run_number').single();
-      if (insertError) throw insertError;
-      setSaveRunMessage(`Đã lưu phiên bản nháp #${inserted.run_number}. Hồ sơ đã được ghi vào Supabase; chưa được duyệt hoặc khóa.`);
-    } catch (e) {
-      setSaveRunError(`Không lưu được phiên bản lương: ${errorText(e)}`);
-    } finally {
-      setSavingRun(false);
-    }
-  };
 
   const visible=useMemo(()=>rows.filter(r=>{
     const q=norm(search);
@@ -464,11 +364,8 @@ export default function PayrollCalculationPage({ page }) {
       <label className="pc-search"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên..."/></label>
       <select className="pc-filter" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} aria-label="Lọc dữ liệu"><option value="ALL">Tất cả dữ liệu</option><option value="ISSUES">Cần kiểm tra</option>{[...new Set(rows.map(r=>r.classification).filter(Boolean))].map(v=><option key={v} value={v}>{v}</option>)}</select>
       <button className="pc-button" onClick={()=>load(true)} disabled={refreshing}><RefreshCw size={15}/> Làm mới</button>
-      {page==='payroll-summary'&&<button className="pc-button pc-primary" onClick={savePayrollRun} disabled={!rows.length||!selectedPeriod||savingRun}>{savingRun?'Đang lưu...':'Lưu phiên bản lương'}</button>}
       <button className="pc-button pc-primary" onClick={exportRows} disabled={!visible.length}><Download size={15}/> Xuất Excel</button>
     </div>
-    {saveRunMessage&&<div className="pc-alert"><ShieldCheck size={17}/><div><strong>Đã lưu phiên bản lương</strong><p>{saveRunMessage}</p></div></div>}
-    {saveRunError&&<div className="pc-alert pc-error"><AlertTriangle size={17}/><div><strong>Lưu phiên bản thất bại</strong><p>{saveRunError}</p></div></div>}
     {error&&<div className="pc-alert pc-error"><AlertTriangle size={17}/><div><strong>Không tải được dữ liệu</strong><p>{error}</p></div></div>}
     {warnings.length>0&&<div className="pc-alert"><AlertTriangle size={17}/><div><strong>Một số nguồn dữ liệu cần kiểm tra</strong><ul>{warnings.slice(0,5).map((w,i)=><li key={i}>{w}</li>)}</ul></div></div>}
     {page==='payroll-overview'&&<div className="pc-metrics">
