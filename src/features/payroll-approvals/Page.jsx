@@ -73,8 +73,8 @@ function displayValue(value, key) {
 }
 
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, char => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  return String(value ?? '').replace(/[&<>\"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;'
   }[char]));
 }
 
@@ -91,6 +91,9 @@ export default function Page() {
   const [approvalWarning, setApprovalWarning] = useState('');
   const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'net_pay']);
   const [exportError, setExportError] = useState('');
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeDepartment, setEmployeeDepartment] = useState('ALL');
+  const [employeeClassification, setEmployeeClassification] = useState('ALL');
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) {
@@ -162,14 +165,26 @@ export default function Page() {
     return [...ordered, ...extra];
   }, [resultRows]);
 
+  const departmentOptions = useMemo(() => [...new Set(resultRows.map(row => clean(row?.department)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [resultRows]);
+  const classificationOptions = useMemo(() => [...new Set(resultRows.map(row => clean(row?.classification)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [resultRows]);
+  const filteredResultRows = useMemo(() => {
+    const q = employeeSearch.trim().toLocaleLowerCase('vi');
+    return resultRows.filter(row => {
+      const identity = [row?.employee_code, row?.employee_name, row?.department, row?.position].join(' ').toLocaleLowerCase('vi');
+      return (!q || identity.includes(q))
+        && (employeeDepartment === 'ALL' || clean(row?.department) === employeeDepartment)
+        && (employeeClassification === 'ALL' || clean(row?.classification) === employeeClassification);
+    });
+  }, [resultRows, employeeSearch, employeeDepartment, employeeClassification]);
+
   const exportKeys = useMemo(() => {
     const identityKeys = ['employee_code', 'employee_name'].filter(key => snapshotKeys.includes(key));
     return [...identityKeys, ...exportComponents.filter(key => snapshotKeys.includes(key))];
   }, [snapshotKeys, exportComponents]);
   const printSnapshot = () => {
     setExportError('');
-    if (!selectedRun || !resultRows.length) {
-      setExportError('Phiên bản lương này chưa có dữ liệu snapshot để xuất.');
+    if (!selectedRun || !filteredResultRows.length) {
+      setExportError('Không có nhân sự phù hợp với bộ lọc để xuất.');
       return;
     }
     if (!exportComponents.length) {
@@ -177,48 +192,41 @@ export default function Page() {
       return;
     }
     if (!exportKeys.length) {
-      setExportError('Các thành phần đã chọn không có trong snapshot của phiên bản này. Không lấy dữ liệu thay thế từ màn hình tính lương.');
+      setExportError('Các thành phần đã chọn không có trong snapshot. Không lấy dữ liệu thay thế từ màn hình tính lương.');
       return;
     }
-
-    // Generate a self-contained print document from the selected saved snapshot.
-    // A separate print window avoids global application CSS hiding or reshaping the report.
     const headers = exportKeys.map(key => `<th>${escapeHtml(snapshotLabel(key))}</th>`).join('');
-    const body = resultRows.map(row => `<tr>${exportKeys.map(key => `<td>${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
-    const totalCells = exportKeys.filter(key => !['employee_code', 'employee_name'].includes(key)).map(key => {
+    const body = filteredResultRows.map(row => `<tr>${exportKeys.map(key => `<td class="${MONEY_KEYS.has(key) ? 'numeric' : ''}">${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
+    const totalKeys = exportKeys.filter(key => !['employee_code','employee_name'].includes(key));
+    const totalLabelCount = exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length;
+    const totals = totalKeys.map(key => {
       if (!MONEY_KEYS.has(key)) return '<td></td>';
-      const total = resultRows.reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0);
-      return `<td class="numeric">${escapeHtml(displayValue(total, key))}</td>`;
+      const total = filteredResultRows.reduce((sum,row) => sum + (Number(row?.[key]) || 0), 0);
+      return `<td class="numeric">${escapeHtml(displayValue(total,key))}</td>`;
     }).join('');
-    const reportTitle = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
-    const html = `<!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(reportTitle)}</title>
+    const title = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
+    const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-@page{size:A4 landscape;margin:10mm}
-*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
-header{margin-bottom:7mm}h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}
-p{font-size:8pt;color:#52677a;margin:0 0 1mm}.meta{display:flex;gap:7mm;flex-wrap:wrap;margin-top:3mm;font-size:8pt}
+@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
+h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}p{font-size:8pt;color:#52677a;margin:0 0 1mm}
+.meta{display:flex;gap:7mm;flex-wrap:wrap;margin:3mm 0 6mm;font-size:8pt}
 table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
 th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
 th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-tr{break-inside:avoid}tfoot{display:table-row-group}.total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr{break-inside:avoid}
+.total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-@media screen{body{padding:12mm}button{margin-bottom:8mm;padding:8px 12px}table{min-width:900px} .table-wrap{overflow:auto}}
-</style></head><body>
-<div class="screen-action"><button onclick="window.print()">In / Lưu PDF</button></div>
-<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1>
-<h2>${escapeHtml(reportTitle)}</h2>
+@media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}button{margin-bottom:8mm;padding:8px 12px}}
+</style></head><body><button onclick="window.print()">In / Lưu PDF</button>
+<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>${escapeHtml(title)}</h2>
 <p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
-<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${resultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span></div></header>
-<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1, exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length)}">TỔNG CỘNG</td>${totalCells}</tr></tbody></table></div>
-<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Trang được tạo: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
-<script>window.addEventListener('load',()=>{document.title=${json.dumps(reportTitle)};window.print();});</script>
-</body></html>`;
+<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${filteredResultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span><span>Phạm vi lọc: ${escapeHtml(employeeDepartment === 'ALL' ? 'Tất cả phòng ban' : employeeDepartment)} · ${escapeHtml(employeeClassification === 'ALL' ? 'Tất cả loại nhân sự' : employeeClassification)}${employeeSearch ? ` · Tìm: ${escapeHtml(employeeSearch)}` : ''}</span></div></header>
+<div class="wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1,totalLabelCount)}">TỔNG CỘNG</td>${totals}</tr></tbody></table></div>
+<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Ngày xuất: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
+<script>window.addEventListener('load',()=>window.print());</script></body></html>`;
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
-      setExportError('Trình duyệt đã chặn cửa sổ in. Vui lòng cho phép pop-up cho trang này rồi thử lại.');
+      setExportError('Trình duyệt đã chặn cửa sổ in. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.');
       return;
     }
     printWindow.document.open();
@@ -267,15 +275,28 @@ footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-si
          <div className="pa-export-heading"><div><h4>Xuất PDF / Bản in</h4><p>Xuất từ snapshot của phiên bản đang chọn; không tính lại lương. Chọn thành phần cần đưa vào bảng.</p></div>
            <button className="pa-button secondary" onClick={printSnapshot} disabled={!resultRows.length}><Printer size={15}/> Xuất PDF / In</button>
          </div>
-         <div className="pa-export-meta"><span><strong>Kỳ lương:</strong> {periodName(selectedPeriod)}</span><span><strong>Phiên bản:</strong> Run #{selectedRun.run_number ?? '—'}</span><span><strong>Phạm vi:</strong> Toàn bộ {resultRows.length} nhân sự trong snapshot</span><span><strong>Trạng thái dữ liệu:</strong> Không hiển thị</span></div>
+         <div className="pa-export-meta"><span><strong>Kỳ lương:</strong> {periodName(selectedPeriod)}</span><span><strong>Phiên bản:</strong> Run #{selectedRun.run_number ?? '—'}</span><span><strong>Phạm vi:</strong> {filteredResultRows.length}/{resultRows.length} nhân sự sau lọc</span><span><strong>Trạng thái dữ liệu:</strong> Không hiển thị</span></div>
+         <div className="pa-employee-filters">
+           <label>Tìm nhân sự<input value={employeeSearch} onChange={event=>setEmployeeSearch(event.target.value)} placeholder="Mã nhân viên, họ tên, chức vụ..." /></label>
+           <label>Phòng ban<select value={employeeDepartment} onChange={event=>setEmployeeDepartment(event.target.value)}><option value="ALL">Tất cả phòng ban</option>{departmentOptions.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+           <label>Loại nhân sự<select value={employeeClassification} onChange={event=>setEmployeeClassification(event.target.value)}><option value="ALL">Tất cả loại nhân sự</option>{classificationOptions.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+           <button type="button" className="pa-button small secondary" onClick={()=>{setEmployeeSearch('');setEmployeeDepartment('ALL');setEmployeeClassification('ALL')}}>Xóa lọc</button>
+         </div>
          <div className="pa-export-components">{EXPORT_COMPONENTS.map(item => <label key={item.key}><input type="checkbox" checked={exportComponents.includes(item.key)} onChange={event => setExportComponents(current => event.target.checked ? [...current, item.key] : current.filter(key => key !== item.key))}/><span>{item.label}</span></label>)}</div>
          {exportError && <div className="pa-alert error"><AlertTriangle size={16}/><div><strong>Chưa thể xuất</strong><p>{exportError}</p></div></div>}
        </section>
-       <div className="pa-subheading"><h4>Kết quả được lưu trong snapshot</h4><span>{resultRows.length ? `${resultRows.length} nhân sự/dòng` : 'Chưa nhận diện được cấu trúc dòng kết quả'}</span></div>
-      {resultRows.length && snapshotKeys.length ? <div className="pa-table-wrap"><table className="pa-table pa-result-table"><thead><tr>{snapshotKeys.map(key => <th key={key} className={`pa-col-${key}`}>{snapshotLabel(key)}</th>)}</tr></thead><tbody>{resultRows.map((row, index) => <tr key={row?.employee_id || row?.employee_code || row?.id || index}>{snapshotKeys.map(key => <td key={key} className={`pa-col-${key}`} title={displayValue(row?.[key], key)}>{displayValue(row?.[key], key)}</td>)}</tr>)}</tbody></table></div>
+       <div className="pa-subheading"><h4>Kết quả được lưu trong snapshot</h4><span>{filteredResultRows.length ? `${filteredResultRows.length}/${resultRows.length} nhân sự sau lọc` : 'Không có nhân sự phù hợp'}</span></div>
+      {filteredResultRows.length && snapshotKeys.length ? <div className="pa-table-wrap"><table className="pa-table pa-result-table"><thead><tr>{snapshotKeys.map(key => <th key={key} className={`pa-col-${key}`}>{snapshotLabel(key)}</th>)}</tr></thead><tbody>{filteredResultRows.map((row, index) => <tr key={row?.employee_id || row?.employee_code || row?.id || index}>{snapshotKeys.map(key => <td key={key} className={`pa-col-${key}`} title={displayValue(row?.[key], key)}>{displayValue(row?.[key], key)}</td>)}</tr>)}</tbody></table></div>
       : <div className="pa-empty compact"><AlertTriangle size={19} /><p>Snapshot của phiên bản này chưa có cấu trúc kết quả nhân sự mà màn hình có thể nhận diện. Không lấy dữ liệu từ màn hình tính lương để tự điền thay thế.</p></div>}
       <div className="pa-subheading"><h4>Lịch sử trình duyệt</h4><span>{selectedApprovals.length} bản ghi</span></div>
       {!selectedApprovals.length ? <div className="pa-empty compact"><Clock3 size={19} /><p>Chưa có bản ghi lịch sử duyệt gắn với phiên bản/kỳ lương này.</p></div> : <div className="pa-approval-list">{selectedApprovals.map(item => <article className="pa-approval-item" key={item.id}><div className="pa-approval-icon">{String(item.status).toUpperCase() === 'APPROVED' ? <CheckCircle2 size={17} /> : String(item.status).toUpperCase() === 'REJECTED' ? <XCircle size={17} /> : <Clock3 size={17} />}</div><div className="pa-approval-main"><strong>{item.step_name || 'Bước duyệt'}</strong><p>{item.note || 'Không có ghi chú'}</p><small>{dateTime(item.created_at)} · Người xử lý: {item.actor_id || 'Chưa ghi nhận'}</small></div><span className={`pa-status ${statusClass(item.status)}`}>{runStatus(item.status)}</span></article>)}</div>}
+       <div className="pa-print-sheet">
+         <header><h1>VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h2><p>Mã kỳ: {selectedPeriod?.period_code || selectedPeriod?.code || '—'} · Thời điểm tính: {dateTime(selectedRun.calculated_at || selectedRun.created_at)}</p></header>
+         <table><thead><tr>{exportKeys.map(key => <th key={key}>{snapshotLabel(key)}</th>)}</tr></thead>
+           <tbody>{resultRows.map((row,index)=><tr key={row?.employee_id || row?.employee_code || index}>{exportKeys.map(key=><td key={key}>{displayValue(row?.[key],key)}</td>)}</tr>)}</tbody>
+         </table>
+         <footer><span>Tổng số nhân sự: {resultRows.length}</span><span>Phiên bản công thức: {selectedRun.formula_version || '—'}</span><span>Xuất từ snapshot đã lưu · Không tính lại lương</span></footer>
+       </div>
     </section>}
     <p className="pa-footnote"><AlertTriangle size={14} /> Chưa bật nút trình duyệt/duyệt/từ chối ở giao diện vì cần xác nhận cơ chế phân quyền theo vai trò và chuyển trạng thái ở backend. RLS hiện tại chỉ kiểm tra quyền vận hành chung ở một số thao tác, chưa đủ bằng chứng để bảo đảm đúng vai trò Kế toán và Sếp.</p>
   </main>;
