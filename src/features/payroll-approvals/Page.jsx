@@ -72,6 +72,12 @@ function displayValue(value, key) {
   return String(value);
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
 export default function Page() {
   const [periods, setPeriods] = useState([]);
   const [runs, setRuns] = useState([]);
@@ -174,7 +180,51 @@ export default function Page() {
       setExportError('Các thành phần đã chọn không có trong snapshot của phiên bản này. Không lấy dữ liệu thay thế từ màn hình tính lương.');
       return;
     }
-    window.print();
+
+    // Generate a self-contained print document from the selected saved snapshot.
+    // A separate print window avoids global application CSS hiding or reshaping the report.
+    const headers = exportKeys.map(key => `<th>${escapeHtml(snapshotLabel(key))}</th>`).join('');
+    const body = resultRows.map(row => `<tr>${exportKeys.map(key => `<td>${escapeHtml(displayValue(row?.[key], key))}</td>`).join('')}</tr>`).join('');
+    const totalCells = exportKeys.filter(key => !['employee_code', 'employee_name'].includes(key)).map(key => {
+      if (!MONEY_KEYS.has(key)) return '<td></td>';
+      const total = resultRows.reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0);
+      return `<td class="numeric">${escapeHtml(displayValue(total, key))}</td>`;
+    }).join('');
+    const reportTitle = `BẢNG TỔNG HỢP LƯƠNG - ${periodName(selectedPeriod)} - Run #${selectedRun.run_number ?? '—'}`;
+    const html = `<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(reportTitle)}</title>
+<style>
+@page{size:A4 landscape;margin:10mm}
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
+header{margin-bottom:7mm}h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}
+p{font-size:8pt;color:#52677a;margin:0 0 1mm}.meta{display:flex;gap:7mm;flex-wrap:wrap;margin-top:3mm;font-size:8pt}
+table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
+th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+th{background:#edf2f6;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+td.numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr{break-inside:avoid}tfoot{display:table-row-group}.total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
+@media screen{body{padding:12mm}button{margin-bottom:8mm;padding:8px 12px}table{min-width:900px} .table-wrap{overflow:auto}}
+</style></head><body>
+<div class="screen-action"><button onclick="window.print()">In / Lưu PDF</button></div>
+<header><h1>TRƯỜNG THPT VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1>
+<h2>${escapeHtml(reportTitle)}</h2>
+<p>Mã kỳ lương: ${escapeHtml(selectedPeriod?.period_code || selectedPeriod?.code || '—')}</p>
+<div class="meta"><span>Thời điểm tính: ${escapeHtml(dateTime(selectedRun.calculated_at || selectedRun.created_at))}</span><span>Số nhân sự: ${resultRows.length}</span><span>Phiên bản công thức: ${escapeHtml(selectedRun.formula_version || '—')}</span></div></header>
+<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}<tr class="total"><td colspan="${Math.max(1, exportKeys.filter(key => ['employee_code','employee_name'].includes(key)).length)}">TỔNG CỘNG</td>${totalCells}</tr></tbody></table></div>
+<footer><span>Xuất từ snapshot đã lưu · Không tính lại lương</span><span>Trang được tạo: ${escapeHtml(new Date().toLocaleString('vi-VN'))}</span></footer>
+<script>window.addEventListener('load',()=>{document.title=${json.dumps(reportTitle)};window.print();});</script>
+</body></html>`;
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      setExportError('Trình duyệt đã chặn cửa sổ in. Vui lòng cho phép pop-up cho trang này rồi thử lại.');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   return <main className="pa-page">
@@ -226,13 +276,6 @@ export default function Page() {
       : <div className="pa-empty compact"><AlertTriangle size={19} /><p>Snapshot của phiên bản này chưa có cấu trúc kết quả nhân sự mà màn hình có thể nhận diện. Không lấy dữ liệu từ màn hình tính lương để tự điền thay thế.</p></div>}
       <div className="pa-subheading"><h4>Lịch sử trình duyệt</h4><span>{selectedApprovals.length} bản ghi</span></div>
       {!selectedApprovals.length ? <div className="pa-empty compact"><Clock3 size={19} /><p>Chưa có bản ghi lịch sử duyệt gắn với phiên bản/kỳ lương này.</p></div> : <div className="pa-approval-list">{selectedApprovals.map(item => <article className="pa-approval-item" key={item.id}><div className="pa-approval-icon">{String(item.status).toUpperCase() === 'APPROVED' ? <CheckCircle2 size={17} /> : String(item.status).toUpperCase() === 'REJECTED' ? <XCircle size={17} /> : <Clock3 size={17} />}</div><div className="pa-approval-main"><strong>{item.step_name || 'Bước duyệt'}</strong><p>{item.note || 'Không có ghi chú'}</p><small>{dateTime(item.created_at)} · Người xử lý: {item.actor_id || 'Chưa ghi nhận'}</small></div><span className={`pa-status ${statusClass(item.status)}`}>{runStatus(item.status)}</span></article>)}</div>}
-       <div className="pa-print-sheet">
-         <header><h1>VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h2><p>Mã kỳ: {selectedPeriod?.period_code || selectedPeriod?.code || '—'} · Thời điểm tính: {dateTime(selectedRun.calculated_at || selectedRun.created_at)}</p></header>
-         <table><thead><tr>{exportKeys.map(key => <th key={key}>{snapshotLabel(key)}</th>)}</tr></thead>
-           <tbody>{resultRows.map((row,index)=><tr key={row?.employee_id || row?.employee_code || index}>{exportKeys.map(key=><td key={key}>{displayValue(row?.[key],key)}</td>)}</tr>)}</tbody>
-         </table>
-         <footer><span>Tổng số nhân sự: {resultRows.length}</span><span>Phiên bản công thức: {selectedRun.formula_version || '—'}</span><span>Xuất từ snapshot đã lưu · Không tính lại lương</span></footer>
-       </div>
     </section>}
     <p className="pa-footnote"><AlertTriangle size={14} /> Chưa bật nút trình duyệt/duyệt/từ chối ở giao diện vì cần xác nhận cơ chế phân quyền theo vai trò và chuyển trạng thái ở backend. RLS hiện tại chỉ kiểm tra quyền vận hành chung ở một số thao tác, chưa đủ bằng chứng để bảo đảm đúng vai trò Kế toán và Sếp.</p>
   </main>;
