@@ -280,13 +280,25 @@ export default function Page() {
     const insuranceEmployee = moneyField(result, ['insurance_employee', 'insuranceEmployee']);
     const insuranceEmployer = moneyField(result, ['employer_insurance', 'employerInsurance']);
     const unionEmployee = moneyField(result, ['union_employee', 'unionEmployee']);
-    const socialEmployee = moneyField(tax, ['employee_social_amount', 'social_employee_amount']);
-    const healthEmployee = moneyField(tax, ['employee_health_amount', 'health_employee_amount']);
-    const unemploymentEmployee = moneyField(tax, ['employee_unemployment_amount', 'unemployment_employee_amount']);
     const base = moneyField(tax, ['insurance_salary_base']) ?? moneyField(insurance, ['insurance_salary_base']);
     const participation = first(tax.participates_insurance, insurance.participates_insurance, null);
+    // Dữ Liệu Kỳ Lương lưu căn cứ đóng và tỷ lệ riêng cho từng nhân sự.
+    // Nếu chưa lưu số tiền thành phần, tính báo cáo từ chính căn cứ × tỷ lệ đã cấu hình.
+    // Không thay đổi snapshot hoặc ghi kết quả tính ngược về Supabase.
+    const socialRate = moneyField(tax, ['employee_social_rate']) ?? moneyField(insurance, ['employee_social_rate']);
+    const healthRate = moneyField(tax, ['employee_health_rate']) ?? moneyField(insurance, ['employee_health_rate']);
+    const unemploymentRate = moneyField(tax, ['employee_unemployment_rate']) ?? moneyField(insurance, ['employee_unemployment_rate']);
+    const calculatedComponent = rate => participation === true && base !== null && rate !== null
+      ? Math.round(base * rate / 100) : null;
+    const socialEmployee = moneyField(tax, ['employee_social_amount', 'social_employee_amount']) ?? calculatedComponent(socialRate);
+    const healthEmployee = moneyField(tax, ['employee_health_amount', 'health_employee_amount']) ?? calculatedComponent(healthRate);
+    const unemploymentEmployee = moneyField(tax, ['employee_unemployment_amount', 'unemployment_employee_amount']) ?? calculatedComponent(unemploymentRate);
+    const componentAmounts = [socialEmployee, healthEmployee, unemploymentEmployee];
+    const calculatedEmployeeInsurance = participation === true && componentAmounts.every(value => value !== null)
+      ? componentAmounts.reduce((sum, value) => sum + value, 0) : null;
     const employeeInsuranceTotal = moneyField(result, ['insurance_employee', 'insuranceEmployee', 'employee_insurance_amount'])
-      ?? moneyField(tax, ['employee_insurance_amount', 'insurance_employee_amount']);
+      ?? moneyField(tax, ['employee_insurance_amount', 'insurance_employee_amount'])
+      ?? calculatedEmployeeInsurance;
     const employerInsuranceTotal = moneyField(result, ['employer_insurance', 'employerInsurance', 'employer_insurance_amount'])
       ?? moneyField(tax, ['employer_insurance_amount', 'insurance_employer_amount']);
     const personalRelief = moneyField(tax, ['personal_relief_amount']) ?? moneyField(taxReliefConfig, ['personal_relief_amount']);
@@ -314,11 +326,11 @@ export default function Page() {
       employee_id: id, employee_code: code, employee_name: name,
       classification: classification || 'Chưa phân loại', department: department || 'Chưa có phòng ban',
       participates_insurance: participation, insurance_salary_base: base,
-      employee_social_rate: moneyField(tax, ['employee_social_rate']) ?? moneyField(insurance, ['employee_social_rate']),
+      employee_social_rate: socialRate,
       employee_social_amount: socialEmployee,
-      employee_health_rate: moneyField(tax, ['employee_health_rate']) ?? moneyField(insurance, ['employee_health_rate']),
+      employee_health_rate: healthRate,
       employee_health_amount: healthEmployee,
-      employee_unemployment_rate: moneyField(tax, ['employee_unemployment_rate']) ?? moneyField(insurance, ['employee_unemployment_rate']),
+      employee_unemployment_rate: unemploymentRate,
       employee_unemployment_amount: unemploymentEmployee,
       employee_insurance_amount: employeeInsuranceTotal, employer_insurance_amount: employerInsuranceTotal,
       taxable_income: taxableIncome, personal_relief_amount: personalRelief, dependent_count: count,
@@ -347,7 +359,7 @@ export default function Page() {
   const maxPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
 
   const insuranceKpis = useMemo(() => {
-    const totalBase = knownSum(detailRows.map(row => row.insurance_salary_base));
+    const totalBase = knownSum(detailRows.filter(row => row.participates_insurance === true).map(row => row.insurance_salary_base));
     const employeeInsurance = knownSum(detailRows.map(row => row.employee_insurance_amount));
     const employerInsurance = knownSum(detailRows.map(row => row.employer_insurance_amount));
     const social = knownSum(detailRows.map(row => row.employee_social_amount));

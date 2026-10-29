@@ -1,9 +1,12 @@
-# VIỆT ÂU PAYROLL – Báo cáo BHXH & thuế V3
+BẢN VÁ V4 – BÁO CÁO BHXH & THUẾ
 
-## Thay đổi
-- Chỉ sửa KPI tổng "Giảm trừ cá nhân" trong tab Thuế TNCN.
-- Công thức hiển thị: số nhân sự có `participates_insurance === true` trong kỳ đang chọn × 15.500.000 VND.
-- Giữ nguyên trường giảm trừ cá nhân của từng nhân viên trong bảng chi tiết, không sửa snapshot, không ghi dữ liệu lên Supabase, không thay đổi công thức tính lương.
+File thay đổi:
+src/features/insurance-tax-report/Page.jsx
 
-## Áp dụng
-Chép `src/features/insurance-tax-report/Page.jsx` vào dự án theo đúng đường dẫn.
+Thay đổi:
+- Đọc căn cứ đóng BHXH và các tỷ lệ NLĐ đóng từ Dữ Liệu Kỳ Lương (payroll_period_insurance_tax_data).
+- Khi không có số tiền thành phần được lưu riêng, tính BHXH/BHYT/BHTN NLĐ theo căn cứ đóng × tỷ lệ tương ứng, chỉ khi nhân sự được đánh dấu tham gia BHXH và đủ dữ liệu căn cứ/tỷ lệ.
+- Tổng căn cứ đóng BHXH chỉ cộng các nhân sự đang tham gia BHXH.
+- Không ghi ngược dữ liệu, không sửa snapshot, không thay đổi công thức tính lương hoặc trạng thái duyệt.
+
+Kiểm tra: TypeScript transpile JSX không có diagnostics. Chưa chạy build toàn dự án hoặc kiểm thử trên Supabase thật.
