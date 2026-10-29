@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, RefreshCw, Search, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, RefreshCw, Search, ShieldCheck, XCircle, Printer } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../shared/supabase.js';
 import './payroll-approvals.css';
 
@@ -40,6 +40,18 @@ const SNAPSHOT_LABELS = {
   net_pay: 'Thực lĩnh',
   lesson_count: 'Số tiết dạy',
 };
+const EXPORT_COMPONENTS = [
+  { key: 'fixed', label: 'Lương cố định' },
+  { key: 'teaching', label: 'Tiền tiết dạy / phụ đạo' },
+  { key: 'additions', label: 'Khoản cộng' },
+  { key: 'deductions', label: 'Khoản trừ' },
+  { key: 'insurance_employee', label: 'BHXH người lao động' },
+  { key: 'union_employee', label: 'Kinh phí công đoàn' },
+  { key: 'taxable_income', label: 'Thu nhập tính thuế' },
+  { key: 'personal_income_tax', label: 'Thuế TNCN' },
+  { key: 'gross_income', label: 'Tổng thu nhập' },
+  { key: 'net_pay', label: 'Thực lĩnh' },
+];
 const MONEY_KEYS = new Set([
   'fixed', 'teaching', 'additions', 'deductions', 'insurance_employee',
   'employer_insurance', 'union_employee', 'taxable_income',
@@ -71,6 +83,8 @@ export default function Page() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [approvalWarning, setApprovalWarning] = useState('');
+  const [exportComponents, setExportComponents] = useState(['fixed', 'teaching', 'additions', 'deductions', 'net_pay']);
+  const [exportError, setExportError] = useState('');
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) {
@@ -142,6 +156,27 @@ export default function Page() {
     return [...ordered, ...extra];
   }, [resultRows]);
 
+  const exportKeys = useMemo(() => {
+    const identityKeys = ['employee_code', 'employee_name'].filter(key => snapshotKeys.includes(key));
+    return [...identityKeys, ...exportComponents.filter(key => snapshotKeys.includes(key))];
+  }, [snapshotKeys, exportComponents]);
+  const printSnapshot = () => {
+    setExportError('');
+    if (!selectedRun || !resultRows.length) {
+      setExportError('Phiên bản lương này chưa có dữ liệu snapshot để xuất.');
+      return;
+    }
+    if (!exportComponents.length) {
+      setExportError('Vui lòng chọn ít nhất một thành phần lương để xuất.');
+      return;
+    }
+    if (!exportKeys.length) {
+      setExportError('Các thành phần đã chọn không có trong snapshot của phiên bản này. Không lấy dữ liệu thay thế từ màn hình tính lương.');
+      return;
+    }
+    window.print();
+  };
+
   return <main className="pa-page">
     <header className="pa-heading">
       <div className="pa-heading-icon"><FileCheck2 size={22} /></div>
@@ -178,11 +213,26 @@ export default function Page() {
     {selectedRun && <section className="pa-card pa-detail">
       <div className="pa-card-heading"><div><div className="pa-eyebrow">CHI TIẾT HỒ SƠ</div><h3>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h3><p>Trạng thái phiên bản: <strong>{runStatus(selectedRun.status)}</strong></p></div><span className={`pa-status ${statusClass(selectedRun.status)}`}>{runStatus(selectedRun.status)}</span></div>
       <div className="pa-info-grid"><div><span>Mã kỳ lương</span><strong>{selectedPeriod?.period_code || selectedPeriod?.code || '—'}</strong></div><div><span>Thời điểm tính</span><strong>{dateTime(selectedRun.calculated_at)}</strong></div><div><span>Phiên bản công thức</span><strong>{selectedRun.formula_version || '—'}</strong></div><div><span>Số dòng kết quả trong snapshot</span><strong>{resultRows.length || 'Chưa xác định'}</strong></div></div>
-      <div className="pa-subheading"><h4>Kết quả được lưu trong snapshot</h4><span>{resultRows.length ? `${resultRows.length} nhân sự/dòng` : 'Chưa nhận diện được cấu trúc dòng kết quả'}</span></div>
+      <section className="pa-export-panel">
+         <div className="pa-export-heading"><div><h4>Xuất PDF / Bản in</h4><p>Xuất từ snapshot của phiên bản đang chọn; không tính lại lương. Chọn thành phần cần đưa vào bảng.</p></div>
+           <button className="pa-button secondary" onClick={printSnapshot} disabled={!resultRows.length}><Printer size={15}/> Xuất PDF / In</button>
+         </div>
+         <div className="pa-export-meta"><span><strong>Kỳ lương:</strong> {periodName(selectedPeriod)}</span><span><strong>Phiên bản:</strong> Run #{selectedRun.run_number ?? '—'}</span><span><strong>Phạm vi:</strong> Toàn bộ {resultRows.length} nhân sự trong snapshot</span><span><strong>Trạng thái dữ liệu:</strong> Không hiển thị</span></div>
+         <div className="pa-export-components">{EXPORT_COMPONENTS.map(item => <label key={item.key}><input type="checkbox" checked={exportComponents.includes(item.key)} onChange={event => setExportComponents(current => event.target.checked ? [...current, item.key] : current.filter(key => key !== item.key))}/><span>{item.label}</span></label>)}</div>
+         {exportError && <div className="pa-alert error"><AlertTriangle size={16}/><div><strong>Chưa thể xuất</strong><p>{exportError}</p></div></div>}
+       </section>
+       <div className="pa-subheading"><h4>Kết quả được lưu trong snapshot</h4><span>{resultRows.length ? `${resultRows.length} nhân sự/dòng` : 'Chưa nhận diện được cấu trúc dòng kết quả'}</span></div>
       {resultRows.length && snapshotKeys.length ? <div className="pa-table-wrap"><table className="pa-table pa-result-table"><thead><tr>{snapshotKeys.map(key => <th key={key} className={`pa-col-${key}`}>{snapshotLabel(key)}</th>)}</tr></thead><tbody>{resultRows.map((row, index) => <tr key={row?.employee_id || row?.employee_code || row?.id || index}>{snapshotKeys.map(key => <td key={key} className={`pa-col-${key}`} title={displayValue(row?.[key], key)}>{displayValue(row?.[key], key)}</td>)}</tr>)}</tbody></table></div>
       : <div className="pa-empty compact"><AlertTriangle size={19} /><p>Snapshot của phiên bản này chưa có cấu trúc kết quả nhân sự mà màn hình có thể nhận diện. Không lấy dữ liệu từ màn hình tính lương để tự điền thay thế.</p></div>}
       <div className="pa-subheading"><h4>Lịch sử trình duyệt</h4><span>{selectedApprovals.length} bản ghi</span></div>
       {!selectedApprovals.length ? <div className="pa-empty compact"><Clock3 size={19} /><p>Chưa có bản ghi lịch sử duyệt gắn với phiên bản/kỳ lương này.</p></div> : <div className="pa-approval-list">{selectedApprovals.map(item => <article className="pa-approval-item" key={item.id}><div className="pa-approval-icon">{String(item.status).toUpperCase() === 'APPROVED' ? <CheckCircle2 size={17} /> : String(item.status).toUpperCase() === 'REJECTED' ? <XCircle size={17} /> : <Clock3 size={17} />}</div><div className="pa-approval-main"><strong>{item.step_name || 'Bước duyệt'}</strong><p>{item.note || 'Không có ghi chú'}</p><small>{dateTime(item.created_at)} · Người xử lý: {item.actor_id || 'Chưa ghi nhận'}</small></div><span className={`pa-status ${statusClass(item.status)}`}>{runStatus(item.status)}</span></article>)}</div>}
+       <div className="pa-print-sheet">
+         <header><h1>VIỆT ÂU · BẢNG TỔNG HỢP LƯƠNG</h1><h2>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h2><p>Mã kỳ: {selectedPeriod?.period_code || selectedPeriod?.code || '—'} · Thời điểm tính: {dateTime(selectedRun.calculated_at || selectedRun.created_at)}</p></header>
+         <table><thead><tr>{exportKeys.map(key => <th key={key}>{snapshotLabel(key)}</th>)}</tr></thead>
+           <tbody>{resultRows.map((row,index)=><tr key={row?.employee_id || row?.employee_code || index}>{exportKeys.map(key=><td key={key}>{displayValue(row?.[key],key)}</td>)}</tr>)}</tbody>
+         </table>
+         <footer><span>Tổng số nhân sự: {resultRows.length}</span><span>Phiên bản công thức: {selectedRun.formula_version || '—'}</span><span>Xuất từ snapshot đã lưu · Không tính lại lương</span></footer>
+       </div>
     </section>}
     <p className="pa-footnote"><AlertTriangle size={14} /> Chưa bật nút trình duyệt/duyệt/từ chối ở giao diện vì cần xác nhận cơ chế phân quyền theo vai trò và chuyển trạng thái ở backend. RLS hiện tại chỉ kiểm tra quyền vận hành chung ở một số thao tác, chưa đủ bằng chứng để bảo đảm đúng vai trò Kế toán và Sếp.</p>
   </main>;

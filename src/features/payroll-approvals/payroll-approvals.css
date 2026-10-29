@@ -33,3 +33,32 @@
 .pa-result-table .pa-col-insurance_employee,.pa-result-table .pa-col-union_employee,
 .pa-result-table .pa-col-taxable_income,.pa-result-table .pa-col-personal_income_tax,
 .pa-result-table .pa-col-gross_income,.pa-result-table .pa-col-net_pay{width:145px;text-align:right}
+
+/* Export PDF / print from the selected immutable payroll snapshot */
+.pa-export-panel{border:1px solid #dfe8ef;background:#fbfdfe;border-radius:10px;padding:13px;margin:16px 0}
+.pa-export-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pa-export-heading h4{font-size:11px;color:#25465f;margin:0 0 4px}
+.pa-export-heading p{font-size:9px;color:#7b8d9c;line-height:1.5;margin:0}
+.pa-export-meta{display:flex;gap:8px 18px;flex-wrap:wrap;margin:12px 0;color:#607589;font-size:9px}
+.pa-export-meta strong{color:#36566f}
+.pa-export-components{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px 12px}
+.pa-export-components label{display:flex;align-items:center;gap:7px;color:#3e566b;font-size:10px;min-width:0}
+.pa-export-components input{accent-color:#1c8c89}
+.pa-print-sheet{display:none}
+@media(max-width:850px){.pa-export-components{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.pa-export-heading{align-items:flex-start;flex-direction:column}.pa-export-components{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@page{size:A4 landscape;margin:10mm}
+@media print{
+  body *{visibility:hidden!important}
+  .pa-print-sheet,.pa-print-sheet *{visibility:visible!important}
+  .pa-print-sheet{display:block!important;position:absolute;left:0;top:0;width:100%;color:#111;font-family:Arial,sans-serif;font-size:9pt}
+  .pa-print-sheet header{margin-bottom:10mm}
+  .pa-print-sheet h1{font-size:15pt;margin:0 0 4mm}
+  .pa-print-sheet h2{font-size:12pt;margin:0 0 2mm}
+  .pa-print-sheet header p{font-size:8pt;margin:0}
+  .pa-print-sheet table{width:100%;border-collapse:collapse;table-layout:auto}
+  .pa-print-sheet th,.pa-print-sheet td{border:1px solid #aab5be;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+  .pa-print-sheet th{background:#eef2f5!important;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pa-print-sheet td{font-size:8pt}
+  .pa-print-sheet footer{display:flex;justify-content:space-between;gap:8px;margin-top:6mm;font-size:8pt}
+}
