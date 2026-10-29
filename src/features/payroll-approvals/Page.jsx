@@ -19,9 +19,44 @@ function snapshotRows(snapshot) {
   }
   return [];
 }
-function displayValue(value) {
+const SNAPSHOT_LABELS = {
+  employee_code: 'Mã nhân viên',
+  employee_name: 'Họ và tên',
+  employee_id: 'ID nhân sự',
+  department: 'Phòng ban',
+  position: 'Chức vụ',
+  classification: 'Loại nhân sự',
+  status: 'Trạng thái dữ liệu',
+  fixed: 'Lương cố định',
+  teaching: 'Tiền tiết dạy',
+  additions: 'Khoản cộng',
+  deductions: 'Khoản trừ',
+  insurance_employee: 'BHXH NLĐ đóng',
+  employer_insurance: 'BHXH doanh nghiệp đóng',
+  union_employee: 'Kinh phí công đoàn NLĐ',
+  taxable_income: 'Thu nhập tính thuế',
+  personal_income_tax: 'Thuế TNCN',
+  gross_income: 'Tổng thu nhập',
+  net_pay: 'Thực lĩnh',
+  lesson_count: 'Số tiết dạy',
+};
+const MONEY_KEYS = new Set([
+  'fixed', 'teaching', 'additions', 'deductions', 'insurance_employee',
+  'employer_insurance', 'union_employee', 'taxable_income',
+  'personal_income_tax', 'gross_income', 'net_pay'
+]);
+function snapshotLabel(key) {
+  return SNAPSHOT_LABELS[key] || key.replaceAll('_', ' ').replace(/^./, ch => ch.toLocaleUpperCase('vi'));
+}
+function displayValue(value, key) {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'object') return JSON.stringify(value);
+  if (MONEY_KEYS.has(key) && Number.isFinite(Number(value))) {
+    return Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+  }
+  if (key === 'lesson_count' && Number.isFinite(Number(value))) {
+    return Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+  }
   return String(value);
 }
 
@@ -131,7 +166,7 @@ export default function Page() {
       <div className="pa-card-heading"><div><div className="pa-eyebrow">CHI TIẾT HỒ SƠ</div><h3>{periodName(selectedPeriod)} · Run #{selectedRun.run_number ?? '—'}</h3><p>Trạng thái phiên bản: <strong>{runStatus(selectedRun.status)}</strong></p></div><span className={`pa-status ${statusClass(selectedRun.status)}`}>{runStatus(selectedRun.status)}</span></div>
       <div className="pa-info-grid"><div><span>Mã kỳ lương</span><strong>{selectedPeriod?.period_code || selectedPeriod?.code || '—'}</strong></div><div><span>Thời điểm tính</span><strong>{dateTime(selectedRun.calculated_at)}</strong></div><div><span>Phiên bản công thức</span><strong>{selectedRun.formula_version || '—'}</strong></div><div><span>Số dòng kết quả trong snapshot</span><strong>{resultRows.length || 'Chưa xác định'}</strong></div></div>
       <div className="pa-subheading"><h4>Kết quả được lưu trong snapshot</h4><span>{resultRows.length ? `${resultRows.length} nhân sự/dòng` : 'Chưa nhận diện được cấu trúc dòng kết quả'}</span></div>
-      {resultRows.length && snapshotKeys.length ? <div className="pa-table-wrap"><table className="pa-table pa-result-table"><thead><tr>{snapshotKeys.map(key => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{resultRows.map((row, index) => <tr key={row?.employee_id || row?.employee_code || row?.id || index}>{snapshotKeys.map(key => <td key={key}>{displayValue(row?.[key])}</td>)}</tr>)}</tbody></table></div>
+      {resultRows.length && snapshotKeys.length ? <div className="pa-table-wrap"><table className="pa-table pa-result-table"><thead><tr>{snapshotKeys.map(key => <th key={key} className={`pa-col-${key}`}>{snapshotLabel(key)}</th>)}</tr></thead><tbody>{resultRows.map((row, index) => <tr key={row?.employee_id || row?.employee_code || row?.id || index}>{snapshotKeys.map(key => <td key={key} className={`pa-col-${key}`} title={displayValue(row?.[key], key)}>{displayValue(row?.[key], key)}</td>)}</tr>)}</tbody></table></div>
       : <div className="pa-empty compact"><AlertTriangle size={19} /><p>Snapshot của phiên bản này chưa có cấu trúc kết quả nhân sự mà màn hình có thể nhận diện. Không lấy dữ liệu từ màn hình tính lương để tự điền thay thế.</p></div>}
       <div className="pa-subheading"><h4>Lịch sử trình duyệt</h4><span>{selectedApprovals.length} bản ghi</span></div>
       {!selectedApprovals.length ? <div className="pa-empty compact"><Clock3 size={19} /><p>Chưa có bản ghi lịch sử duyệt gắn với phiên bản/kỳ lương này.</p></div> : <div className="pa-approval-list">{selectedApprovals.map(item => <article className="pa-approval-item" key={item.id}><div className="pa-approval-icon">{String(item.status).toUpperCase() === 'APPROVED' ? <CheckCircle2 size={17} /> : String(item.status).toUpperCase() === 'REJECTED' ? <XCircle size={17} /> : <Clock3 size={17} />}</div><div className="pa-approval-main"><strong>{item.step_name || 'Bước duyệt'}</strong><p>{item.note || 'Không có ghi chú'}</p><small>{dateTime(item.created_at)} · Người xử lý: {item.actor_id || 'Chưa ghi nhận'}</small></div><span className={`pa-status ${statusClass(item.status)}`}>{runStatus(item.status)}</span></article>)}</div>}
