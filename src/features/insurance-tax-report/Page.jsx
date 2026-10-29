@@ -38,7 +38,11 @@ const snapshotOf = run => run?.input_snapshot && typeof run.input_snapshot === '
 const snapshotResults = run => Array.isArray(snapshotOf(run).results) ? snapshotOf(run).results : [];
 const snapshotTotals = run => snapshotOf(run).totals && typeof snapshotOf(run).totals === 'object' ? snapshotOf(run).totals : {};
 const totalFrom = (rows, field) => rows.reduce((sum, row) => sum + (numberOrNull(row[field]) ?? 0), 0);
-const knownSum = values => values.length && values.every(value => value !== null && value !== undefined) ? values.reduce((sum, value) => sum + Number(value), 0) : null;
+const knownSum = values => {
+  const known = values.filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)));
+  return known.length ? known.reduce((sum, value) => sum + Number(value), 0) : null;
+};
+const missingValueCount = values => values.filter(value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value))).length;
 const getEmployeeId = row => String(first(row?.employee_id, row?.id, '') || '');
 const getRunPeriodId = run => String(first(run?.payroll_period_id, run?.period_id, '') || '');
 const getRunId = run => String(first(run?.id, '') || '');
@@ -81,6 +85,8 @@ export default function Page() {
   const [runs, setRuns] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [periodTaxData, setPeriodTaxData] = useState([]);
+  const [periodEmployees, setPeriodEmployees] = useState([]);
+  const [taxReliefConfig, setTaxReliefConfig] = useState(null);
   const [insuranceProfiles, setInsuranceProfiles] = useState([]);
   const [dependents, setDependents] = useState([]);
   const [commitments, setCommitments] = useState([]);
@@ -111,11 +117,13 @@ export default function Page() {
     setError('');
     const optionalWarnings = [];
     try {
-      const [periodResult, runResult, employeeResult, periodTaxResult, insuranceResult, dependentResult, commitmentResult, unionResult, approvalResult] = await Promise.all([
+      const [periodResult, runResult, employeeResult, periodTaxResult, periodEmployeeResult, taxConfigResult, insuranceResult, dependentResult, commitmentResult, unionResult, approvalResult] = await Promise.all([
         supabase.from('payroll_periods').select('*').order('created_at', { ascending: false }),
         supabase.from('payroll_runs').select('*').order('run_number', { ascending: false }),
         supabase.from('employees').select('*'),
         supabase.from('payroll_period_insurance_tax_data').select('*'),
+        supabase.from('payroll_period_employees').select('*'),
+        supabase.from('payroll_tax_relief_config').select('*').eq('config_key', 'default').maybeSingle(),
         supabase.from('employee_insurance_profiles').select('*'),
         supabase.from('employee_tax_dependents').select('*'),
         supabase.from('employee_income_commitments').select('*'),
@@ -128,6 +136,8 @@ export default function Page() {
       setRuns(runResult.data || []);
       if (employeeResult.error) optionalWarnings.push(`Employee Master: ${employeeResult.error.message}`);
       if (periodTaxResult.error) optionalWarnings.push(`Dữ liệu BHXH/thuế theo kỳ: ${periodTaxResult.error.message}`);
+      if (periodEmployeeResult.error) optionalWarnings.push(`Dữ liệu nhân sự kỳ lương: ${periodEmployeeResult.error.message}`);
+      if (taxConfigResult.error) optionalWarnings.push(`Cấu hình giảm trừ thuế: ${taxConfigResult.error.message}`);
       if (insuranceResult.error) optionalWarnings.push(`Hồ sơ bảo hiểm: ${insuranceResult.error.message}`);
       if (dependentResult.error) optionalWarnings.push(`Người phụ thuộc: ${dependentResult.error.message}`);
       if (commitmentResult.error) optionalWarnings.push(`Cam kết thu nhập: ${commitmentResult.error.message}`);
@@ -135,6 +145,8 @@ export default function Page() {
       if (approvalResult.error) optionalWarnings.push(`Lịch sử duyệt: ${approvalResult.error.message}`);
       setEmployees(employeeResult.data || []);
       setPeriodTaxData(periodTaxResult.data || []);
+      setPeriodEmployees(periodEmployeeResult.data || []);
+      setTaxReliefConfig(taxConfigResult.data || null);
       setInsuranceProfiles(insuranceResult.data || []);
       setDependents(dependentResult.data || []);
       setCommitments(commitmentResult.data || []);
@@ -166,9 +178,33 @@ export default function Page() {
   }, [selectedRun, activeRunId]);
 
   const period = useMemo(() => periods.find(item => String(item.id) === String(activePeriodId)) || null, [periods, activePeriodId]);
-  const results = useMemo(() => snapshotResults(selectedRun), [selectedRun]);
-  const totals = useMemo(() => snapshotTotals(selectedRun), [selectedRun]);
   const activeTaxRows = useMemo(() => periodTaxData.filter(row => String(row.period_id) === String(activePeriodId)), [periodTaxData, activePeriodId]);
+  const activePeriodEmployees = useMemo(() => periodEmployees.filter(row => String(row.period_id) === String(activePeriodId)), [periodEmployees, activePeriodId]);
+  const results = useMemo(() => {
+    const snapshots = snapshotResults(selectedRun);
+    const baseRows = activePeriodEmployees.length ? activePeriodEmployees : activeTaxRows;
+    if (!baseRows.length) return snapshots;
+    const keyOf = row => {
+      const id = String(first(row?.employee_id, row?.id, '') || '').trim();
+      const code = String(first(row?.employee_code, row?.employee_code_snapshot, row?.code, '') || '').trim().toLocaleUpperCase('vi');
+      return id ? `id:${id}` : code ? `code:${code}` : '';
+    };
+    const merged = new Map();
+    for (const row of baseRows) {
+      const key = keyOf(row);
+      if (key) merged.set(key, { ...row });
+    }
+    for (const row of snapshots) {
+      const key = keyOf(row);
+      if (!key) continue;
+      const base = merged.get(key) || {};
+      merged.set(key, { ...base, ...row });
+    }
+    // Keep the saved snapshot as the source for calculated amounts, but use Dữ Liệu Kỳ Lương
+    // to complete employees and period-specific insurance/tax fields when snapshot fields are absent.
+    return [...merged.values()];
+  }, [selectedRun, activePeriodEmployees, activeTaxRows]);
+  const totals = useMemo(() => snapshotTotals(selectedRun), [selectedRun]);
   const masterById = useMemo(() => new Map(employees.map(row => [getEmployeeId(row), row])), [employees]);
   const masterByCode = useMemo(() => new Map(employees.map(row => [employeeMapKey(row), row]).filter(([key]) => key)), [employees]);
   const taxById = useMemo(() => new Map(activeTaxRows.map(row => [String(row.employee_id), row])), [activeTaxRows]);
@@ -215,18 +251,32 @@ export default function Page() {
     return map;
   }, [approvals]);
 
-  const detailRows = useMemo(() => results.map((result, index) => {
-    const code = String(first(result.code, result.employee_code, '') || '');
-    const name = String(first(result.employee_name, result.name, code, 'Chưa có tên') || 'Chưa có tên');
+  const detailRows = useMemo(() => results.map((result) => {
+    const code = String(first(result.code, result.employee_code, result.employee_code_snapshot, '') || '');
+    const name = String(first(result.employee_name, result.full_name, result.name, result.employee_name_snapshot, code, 'Chưa có tên') || 'Chưa có tên');
     const master = masterByCode.get(code.trim().toLocaleUpperCase('vi')) || masterById.get(String(result.employee_id || '')) || {};
     const id = String(first(result.employee_id, master.id, '') || '');
+    // Dữ liệu Kỳ Lương là nguồn ưu tiên cho các cấu hình BHXH/thuế của đúng kỳ.
+    // Snapshot vẫn được ưu tiên cho kết quả thực tế đã chốt như thuế và tổng bảo hiểm.
     const tax = taxById.get(id) || taxByCode.get(code.trim().toLocaleUpperCase('vi')) || {};
     const insurance = insuranceById.get(id) || {};
     const commitment = commitmentById.get(id) || {};
     const union = unionById.get(id) || {};
-    const count = tax.dependent_count !== undefined && tax.dependent_count !== null ? Number(tax.dependent_count) : (dependentCounts.has(id) ? dependentCounts.get(id) : null);
-    const taxableIncome = moneyField(result, ['taxable_income', 'taxable', 'taxable_income_base']);
-    const taxAmount = moneyField(result, ['personal_income_tax', 'tax_amount', 'taxAmount']);
+    const masterDependentCount = (() => {
+      const sources = [master, master.custom_fields && typeof master.custom_fields === 'object' ? master.custom_fields : {}];
+      const keys = new Set(['dependents_count','dependent_count','so nguoi phu thuoc','nguoi phu thuoc'].map(norm));
+      for (const source of sources) for (const [key, value] of Object.entries(source || {})) {
+        if (keys.has(norm(key)) && value !== null && value !== undefined && String(value).trim() !== '') {
+          const n = numberOrNull(value); if (n !== null && n >= 0) return Math.floor(n);
+        }
+      }
+      return null;
+    })();
+    const count = numberOrNull(first(tax.dependent_count, masterDependentCount, dependentCounts.has(id) ? dependentCounts.get(id) : null));
+    const taxableIncome = moneyField(result, ['taxable_income', 'taxable', 'taxable_income_base'])
+      ?? moneyField(tax, ['taxable_income', 'taxable_income_override', 'calculated_taxable_income']);
+    const taxAmount = moneyField(result, ['personal_income_tax', 'tax_amount', 'taxAmount'])
+      ?? moneyField(tax, ['personal_income_tax', 'tax_amount']);
     const insuranceEmployee = moneyField(result, ['insurance_employee', 'insuranceEmployee']);
     const insuranceEmployer = moneyField(result, ['employer_insurance', 'employerInsurance']);
     const unionEmployee = moneyField(result, ['union_employee', 'unionEmployee']);
@@ -235,19 +285,32 @@ export default function Page() {
     const unemploymentEmployee = moneyField(tax, ['employee_unemployment_amount', 'unemployment_employee_amount']);
     const base = moneyField(tax, ['insurance_salary_base']) ?? moneyField(insurance, ['insurance_salary_base']);
     const participation = first(tax.participates_insurance, insurance.participates_insurance, null);
-    const employeeInsuranceTotal = moneyField(tax, ['employee_insurance_amount', 'insurance_employee_amount']) ?? insuranceEmployee;
-    const employerInsuranceTotal = moneyField(tax, ['employer_insurance_amount', 'insurance_employer_amount']) ?? insuranceEmployer;
-    const personalRelief = moneyField(tax, ['personal_relief_amount']);
-    const dependentReliefUnit = moneyField(tax, ['dependent_relief_amount']);
-    const dependentRelief = count !== null && dependentReliefUnit !== null ? count * dependentReliefUnit : null;
-    const deductibleInsurance = moneyField(tax, ['insurance_deductible_amount']) ?? insuranceEmployee;
-    const taxableBase = moneyField(tax, ['taxable_income_base', 'calculated_taxable_income']);
-    const hasTaxData = Object.keys(tax).length > 0 || taxableIncome !== null || taxAmount !== null;
-    const hasInsuranceData = Object.keys(tax).length > 0 || Object.keys(insurance).length > 0 || insuranceEmployee !== null || insuranceEmployer !== null;
+    const employeeInsuranceTotal = moneyField(result, ['insurance_employee', 'insuranceEmployee', 'employee_insurance_amount'])
+      ?? moneyField(tax, ['employee_insurance_amount', 'insurance_employee_amount']);
+    const employerInsuranceTotal = moneyField(result, ['employer_insurance', 'employerInsurance', 'employer_insurance_amount'])
+      ?? moneyField(tax, ['employer_insurance_amount', 'insurance_employer_amount']);
+    const personalRelief = moneyField(tax, ['personal_relief_amount']) ?? moneyField(taxReliefConfig, ['personal_relief_amount']);
+    const dependentReliefUnit = moneyField(tax, ['dependent_relief_amount']) ?? moneyField(taxReliefConfig, ['dependent_relief_amount']);
+    const dependentRelief = moneyField(tax, ['dependent_relief_total', 'total_dependent_relief_amount'])
+      ?? (count !== null && dependentReliefUnit !== null ? count * dependentReliefUnit : null);
+    const deductibleInsurance = moneyField(tax, ['insurance_deductible_amount']) ?? employeeInsuranceTotal;
+    const taxableBase = moneyField(result, ['taxable_income_base', 'taxable_base'])
+      ?? moneyField(tax, ['taxable_income_base', 'calculated_taxable_income']);
+    const hasTaxData = [
+      taxableIncome, tax.personal_relief_amount, tax.dependent_relief_amount,
+      tax.insurance_deductible_amount, tax.taxable_income_base, tax.calculated_taxable_income,
+      taxAmount, tax.has_commitment, tax.commitment_validated, tax.dependent_count
+    ].some(value => value !== null && value !== undefined && value !== '');
+    const hasInsuranceData = [
+      base, participation, employeeInsuranceTotal, employerInsuranceTotal,
+      socialEmployee, healthEmployee, unemploymentEmployee,
+      tax.employee_social_rate, tax.employee_health_rate, tax.employee_unemployment_rate
+    ].some(value => value !== null && value !== undefined && value !== '')
+      || Object.keys(insurance).length > 0;
     const status = !hasInsuranceData && !hasTaxData ? 'Thiếu dữ liệu' : (hasInsuranceData && (participation === true || participation === false) ? 'Có dữ liệu' : 'Cần kiểm tra');
-    const classification = first(result.classification, master.employee_type, master.classification, master.employment_type, '');
-    const department = first(result.department, master.department, master.department_name, master.division, '');
-    const row = {
+    const classification = first(result.classification, result.employee_type, master.employee_type, master.classification, master.employment_type, '');
+    const department = first(result.department, result.department_name, master.department, master.department_name, master.division, '');
+    return {
       employee_id: id, employee_code: code, employee_name: name,
       classification: classification || 'Chưa phân loại', department: department || 'Chưa có phòng ban',
       participates_insurance: participation, insurance_salary_base: base,
@@ -266,8 +329,7 @@ export default function Page() {
       status, _hasInsuranceData: hasInsuranceData, _hasTaxData: hasTaxData,
       _rawTax: tax, _rawInsurance: insurance, _rawResult: result, _union: union
     };
-    return row;
-  }).sort((a, b) => a.employee_code.localeCompare(b.employee_code, 'vi', { numeric: true })), [results, masterByCode, masterById, taxById, taxByCode, insuranceById, commitmentById, unionById, dependentCounts]);
+  }).sort((a, b) => a.employee_code.localeCompare(b.employee_code, 'vi', { numeric: true })), [results, masterByCode, masterById, taxById, taxByCode, insuranceById, commitmentById, unionById, dependentCounts, taxReliefConfig]);
 
   const classifications = useMemo(() => [...new Set(detailRows.map(row => row.classification).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [detailRows]);
   const departments = useMemo(() => [...new Set(detailRows.map(row => row.department).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi')), [detailRows]);
@@ -380,7 +442,7 @@ export default function Page() {
 
       {!loading && !error && selectedRun && <>
         <div className={`itr-run-banner ${statusTone(selectedRun.status)}`}>
-          <div><strong>{periodName(period)} · {runLabel(selectedRun)}</strong><p>Đang xem đúng một phiên bản lương. Các số liệu tiền lương được đọc từ snapshot đã lưu; hồ sơ bổ sung chỉ dùng để đối chiếu.</p></div>
+          <div><strong>{periodName(period)} · {runLabel(selectedRun)}</strong><p>Đang xem một kỳ và phiên bản lương. Thông tin BHXH/thuế ưu tiên Dữ Liệu Kỳ Lương; số tiền đã tính ưu tiên snapshot, hồ sơ nhân sự chỉ bổ sung khi thiếu trường.</p></div>
           <span className={`itr-status ${statusTone(selectedRun.status)}`}>{statusLabel(selectedRun.status)}</span>
         </div>
 
