@@ -7,7 +7,7 @@ const clean = value => String(value ?? '').trim();
 const money = value => Number(value || 0).toLocaleString('vi-VN', { maximumFractionDigits: 0 }) + ' ₫';
 const dateTime = value => value ? new Date(value).toLocaleString('vi-VN') : '—';
 const periodName = period => clean(period?.name || period?.period_code || period?.code || `Kỳ ${period?.period_year || ''}-${String(period?.period_month || '').padStart(2, '0')}`);
-const runStatus = value => ({ DRAFT: 'Bản nháp', PENDING: 'Chờ duyệt', SUBMITTED: 'Đã trình duyệt', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', LOCKED: 'Đã khóa', CANCELLED: 'Đã hủy' }[String(value || '').toUpperCase()] || value || 'Chưa xác định');
+const runStatus = value => ({ DRAFT: 'Bản nháp', PENDING: 'Chờ duyệt', SUBMITTED: 'Chờ duyệt', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', LOCKED: 'Đã khóa', CANCELLED: 'Đã hủy' }[String(value || '').toUpperCase()] || value || 'Chưa xác định');
 const statusClass = value => ({ APPROVED: 'approved', LOCKED: 'approved', PENDING: 'pending', SUBMITTED: 'pending', REJECTED: 'rejected', CANCELLED: 'muted', DRAFT: 'draft' }[String(value || '').toUpperCase()] || 'muted');
 const errorText = error => error?.message || error?.details || String(error || 'Lỗi không xác định');
 
@@ -141,9 +141,9 @@ export default function Page() {
     if (!selectedRun || actionBusy || !supabase || !isSupabaseConfigured) return;
     const current = String(selectedRun.status || '').toUpperCase();
     const allowed = {
-      PENDING: ['DRAFT'],
-      APPROVED: ['PENDING', 'SUBMITTED'],
-      REJECTED: ['PENDING', 'SUBMITTED'],
+      SUBMITTED: ['DRAFT'],
+      APPROVED: ['SUBMITTED'],
+      REJECTED: ['SUBMITTED'],
       LOCKED: ['APPROVED'],
     };
     if (!(allowed[nextStatus] || []).includes(current)) {
@@ -354,8 +354,8 @@ footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-si
         <div className="pa-workflow-copy"><h4>Xử lý hồ sơ lương</h4><p>Thao tác áp dụng cho Run #{selectedRun.run_number ?? '—'} đang chọn, không thay đổi số tiền trong snapshot.</p></div>
         <label className="pa-workflow-note">Ghi chú / lý do từ chối<textarea value={actionNote} onChange={event=>setActionNote(event.target.value)} rows={2} placeholder="Nhập ghi chú; bắt buộc khi từ chối..." disabled={actionBusy || ['APPROVED','LOCKED','CANCELLED'].includes(String(selectedRun.status||'').toUpperCase())}/></label>
         <div className="pa-workflow-actions">
-          {String(selectedRun.status).toUpperCase()==='DRAFT' && <button className="pa-button primary" onClick={()=>transitionRun('PENDING','Kế toán trình duyệt')} disabled={actionBusy}><Send size={15}/> Trình duyệt</button>}
-          {['PENDING','SUBMITTED'].includes(String(selectedRun.status).toUpperCase()) && <>
+          {String(selectedRun.status).toUpperCase()==='DRAFT' && <button className="pa-button primary" onClick={()=>transitionRun('SUBMITTED','Kế toán trình duyệt')} disabled={actionBusy}><Send size={15}/> Trình duyệt</button>}
+          {String(selectedRun.status).toUpperCase()==='SUBMITTED' && <>
             <button className="pa-button approve" onClick={()=>transitionRun('APPROVED','Sếp duyệt')} disabled={actionBusy}><CheckCircle2 size={15}/> Duyệt lương</button>
             <button className="pa-button reject" onClick={()=>transitionRun('REJECTED','Sếp từ chối',true)} disabled={actionBusy}><XCircle size={15}/> Từ chối</button>
           </>}
