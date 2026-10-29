@@ -230,7 +230,20 @@ export default function PayrollCalculationPage({ page }) {
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
-          const col=columnsById.get(clean(rec.salary_rate_column_id));
+          // Resolve the saved column reference using ID first, then historical code/name/label.
+          // Older records can keep a code or column name instead of the current UUID.
+          const rawColumnRef = clean(
+            rec.salary_rate_column_id ||
+            rec.salary_rate_column_code ||
+            rec.salary_rate_column_name ||
+            rec.column_code ||
+            rec.column_name
+          );
+          const col = columnsById.get(rawColumnRef) || columns.find(c =>
+            [c.id, c.code, c.name, c.label].some(value =>
+              clean(value) && norm(value) === norm(rawColumnRef)
+            )
+          );
           if(!col) continue;
           lessonCount+=num(rec.lesson_count);
           if(Object.prototype.hasOwnProperty.call(lessonParts,`lesson_${col.id}`)) lessonParts[`lesson_${col.id}`]+=num(rec.lesson_count);
@@ -301,7 +314,10 @@ export default function PayrollCalculationPage({ page }) {
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
-        if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
+        if(lessons.some(r=>{
+          const ref=clean(r.salary_rate_column_id||r.salary_rate_column_code||r.salary_rate_column_name||r.column_code||r.column_name);
+          return !(columnsById.get(ref) || columns.find(c=>[c.id,c.code,c.name,c.label].some(value=>clean(value)&&norm(value)===norm(ref))));
+        })) status.push('Có tiết chưa khớp cấu hình');
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
         if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
         if(!classification) status.push('Chưa cập nhật phân loại');
