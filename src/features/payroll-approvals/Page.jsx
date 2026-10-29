@@ -207,8 +207,8 @@ export default function Page() {
     const title = `${periodName(selectedPeriod)} - BẢNG LƯƠNG`;
     const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
-@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172b3a;margin:0;font-size:9pt}
-h1{font-size:15pt;margin:0 0 3mm}h2{font-size:11pt;margin:0 0 2mm}p{font-size:8pt;color:#52677a;margin:0 0 1mm}
+@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;color:#172b3a;margin:0;font-size:9pt;font-synthesis:none;-webkit-font-smoothing:antialiased}
+h1{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:15pt;margin:0 0 3mm}h2{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:11pt;margin:0 0 2mm}p{font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8pt;color:#52677a;margin:0 0 1mm}
 .meta{display:flex;gap:7mm;flex-wrap:wrap;margin:3mm 0 6mm;font-size:8pt}
 table{width:100%;border-collapse:collapse;table-layout:auto}thead{display:table-header-group}
 th,td{border:1px solid #aab6c1;padding:5px 6px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
@@ -218,12 +218,13 @@ td.net-pay{font-size:10pt;font-weight:800;color:#102d4a}
 tr{break-inside:avoid}
 .total td{font-weight:700;background:#f2f5f7;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 footer{display:flex;justify-content:space-between;gap:5mm;margin-top:5mm;font-size:8pt;color:#52677a}
-.confirmation{border:2px dashed #9aaabd;border-radius:8mm;background:#f8faff;padding:8mm 10mm;margin-top:7mm;font-size:10pt;line-height:1.55;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.confirmation-heading{display:flex;align-items:center;gap:3mm;color:#3265a0;font-weight:800;font-size:15pt;letter-spacing:.2px;margin-bottom:3mm}
-.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-size:19pt;font-weight:800;line-height:1}
-.confirmation-time{display:block;color:#172b3a;font-weight:800;font-size:13pt;margin-bottom:1mm}
-.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:12mm;page-break-inside:avoid;text-align:center}
-.signature-title{font-weight:700;font-size:10pt;text-transform:none}.signature-name{font-weight:700;margin-top:20mm;font-size:10pt}
+.confirmation{width:34%;min-width:78mm;max-width:105mm;border:1.5px dashed #9aaabd;border-radius:4mm;background:#f8faff;padding:4mm 5mm;margin-top:6mm;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;font-size:8pt;line-height:1.35;color:#52677a;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
+.confirmation-heading{display:flex;align-items:center;gap:2mm;color:#3265a0;font-weight:700;font-size:10pt;letter-spacing:0;margin-bottom:2mm}
+.confirmation-check{display:inline-flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:13pt;font-weight:700;line-height:1}
+.confirmation-time{display:block;color:#172b3a;font-weight:700;font-size:8.5pt;margin-bottom:1mm;white-space:normal}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:12mm;page-break-inside:avoid;text-align:center;font-family:Arial,"Helvetica Neue",Helvetica,sans-serif}
+.signature-title{font-weight:600;font-size:9pt;text-transform:none}.signature-name{font-weight:700;margin-top:20mm;font-size:9pt}
+@media screen{.confirmation{width:34%;min-width:360px;max-width:520px}}
 @media screen{body{padding:12mm}table{min-width:900px}.wrap{overflow:auto}}
 </style></head><body>
 <header><h1>TRƯỜNG THPT VIỆT ÂU</h1><h2>${escapeHtml(periodName(selectedPeriod))}</h2>
