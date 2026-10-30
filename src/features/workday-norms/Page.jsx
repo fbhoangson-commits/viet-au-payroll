@@ -32,7 +32,7 @@ function getRateValue(values, field, component) {
 }
 
 export default function Page() {
-  const [employees, setEmployees] = useState([]); const [policies, setPolicies] = useState([]); const [policyId, setPolicyId] = useState('');
+  const [employees, setEmployees] = useState([]); const [policies, setPolicies] = useState([]); const [policyId, setPolicyId] = useState(''); const [rateVersions,setRateVersions]=useState([]); const [rateVersionId,setRateVersionId]=useState('');
   const [norms, setNorms] = useState([]); const [fields, setFields] = useState([]); const [rateValues, setRateValues] = useState([]); const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false); const [busy, setBusy] = useState(false); const [search, setSearch] = useState(''); const [message, setMessage] = useState(null); const [importSummary, setImportSummary] = useState(null);
 
@@ -46,21 +46,26 @@ export default function Page() {
         supabase.from('salary_workday_norms').select('*').order('created_at', { ascending: false }),
         supabase.from('salary_rate_columns').select('*').eq('is_active', true).order('display_order').order('name'),
         supabase.from('salary_rate_values').select('*'),
+        supabase.from('salary_rate_versions').select('*').order('created_at'),
+        supabase.from('salary_rate_version_values').select('*'),
         supabase.from('salary_rate_groups').select('*'),
       ]);
-      const [employeeRows, p, n, f, v, g] = results;
-      if (p.error) throw p.error; if (n.error) throw n.error; if (f.error) throw f.error; if (v.error) throw v.error; if (g.error) throw g.error;
-      setEmployees((employeeRows || []).map(expandEmployee)); setPolicies(p.data || []); setNorms(n.data || []); setFields(f.data || []); setRateValues(v.data || []); setGroups(g.data || []);
+      const [employeeRows, p, n, f, v, g, rv, rvv] = results;
+      if (p.error) throw p.error; if (n.error) throw n.error; if (f.error) throw f.error; if (v.error) throw v.error; if (g.error) throw g.error; if (rv.error) throw rv.error; if (rvv.error) throw rvv.error;
+      setEmployees((employeeRows || []).map(expandEmployee)); setPolicies(p.data || []); setNorms(n.data || []); setFields(f.data || []); setRateValues([...(v.data || []),...(rvv.data || [])]); setGroups(g.data || []); setRateVersions(rv.data||[]);
       setPolicyId(old => old && (p.data || []).some(x => x.id === old) ? old : ((p.data || []).find(x => String(x.status).toUpperCase() === 'ACTIVE') || (p.data || [])[0])?.id || '');
+      const chosenPolicyId=(p.data||[]).find(x=>String(x.status).toUpperCase()==='ACTIVE')?.id||(p.data||[])[0]?.id||''; setRateVersionId(old=>old&&(rv.data||[]).some(x=>x.id===old&&x.policy_version_id===(policyId||chosenPolicyId))?old:(rv.data||[]).find(x=>x.policy_version_id===(policyId||chosenPolicyId))?.id||'');
     } catch (e) { setMessage({ type: 'error', text: `Không tải được dữ liệu: ${e.message || e.code}. Kiểm tra schema và migration Định Mức Ngày Công.` }); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(()=>{const list=rateVersions.filter(v=>v.policy_version_id===policyId);if(list.length&&!list.some(v=>v.id===rateVersionId))setRateVersionId(list[0].id);},[policyId,rateVersions]);
+  useEffect(()=>{const v=rateVersions.find(x=>x.id===rateVersionId);if(v){if(v.groups_snapshot?.length)setGroups(v.groups_snapshot);if(v.columns_snapshot?.length)setFields(v.columns_snapshot.filter(c=>c.is_active!==false));}},[rateVersionId,rateVersions]);
 
   const fixedFieldMap = useMemo(() => FIXED_COMPONENTS.map(component => ({ ...component, field: fields.find(f => [f.code, f.field_code, f.name, f.label].some(x => x && component.labels.includes(norm(x)) || x && norm(x).replace(/_/g, ' ') === norm(component.code).replace(/_/g, ' '))) })), [fields]);
   const fixedGroupId = useMemo(() => groups.find(g => norm(g.name) === 'co dinh' || norm(g.code) === 'fixed')?.id, [groups]);
   const normByEmployee = useMemo(() => new Map(norms.filter(n => n.policy_version_id === policyId && n.employee_id).map(n => [String(n.employee_id), n])), [norms, policyId]);
-  const rateMap = useMemo(() => new Map(rateValues.filter(v => v.policy_version_id === policyId && (!fixedGroupId || v.group_id === fixedGroupId)).map(v => [v.employee_id, v])), [rateValues, policyId, fixedGroupId]);
+  const rateMap = useMemo(() => { const versionRows=rateVersionId?rateValues.filter(v=>v.rate_version_id===rateVersionId):[]; const source=rateVersionId?versionRows:rateValues.filter(v=>v.policy_version_id===policyId); return new Map(source.filter(v => !fixedGroupId || v.group_id === fixedGroupId).map(v => [v.employee_id, v])); }, [rateValues, policyId, rateVersionId, fixedGroupId]);
   const rows = useMemo(() => employees.map(e => {
     const position = getEmployeePosition(e); const workdayNorm = normByEmployee.get(String(e.id)) || normByEmployee.get(String(e.supabase_id || '')); const stored = rateMap.get(e.id) || rateMap.get(e.supabase_id);
     const values = stored?.values || {}; const components = fixedFieldMap.map(c => ({ ...c, value: getRateValue(values, c.field, c) }));
@@ -126,7 +131,7 @@ export default function Page() {
       <label className="wn-button"><Upload size={15}/> Import<input type="file" accept=".csv,.xlsx,.xls" onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }}/></label>
       <button className="wn-button" onClick={exportRows}><Download size={15}/> Export</button>
       <button className="wn-button" onClick={load} disabled={loading}><RefreshCw size={15}/> Làm mới</button>
-      <label className="wn-policy">Chính Sách Lương<select value={policyId} onChange={e => setPolicyId(e.target.value)}><option value="">Chọn chính sách</option>{policies.map(p => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label>
+      <label className="wn-policy">Chính Sách Lương<select value={policyId} onChange={e => setPolicyId(e.target.value)}><option value="">Chọn chính sách</option>{policies.map(p => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}</select></label><label className="wn-policy">Phiên Bản Định Mức<select value={rateVersionId} onChange={e=>setRateVersionId(e.target.value)}><option value="">Chọn phiên bản</option>{rateVersions.filter(v=>v.policy_version_id===policyId).map(v=><option key={v.id} value={v.id}>{v.code} · {v.name}</option>)}</select></label>
       <label className="wn-search"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm mã, họ tên, vị trí..."/></label>
     </div>
     {message && <div className={`wn-message ${message.type}`}><AlertCircle size={16}/><span>{message.text}</span></div>}

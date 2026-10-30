@@ -12,6 +12,7 @@ const SNAPSHOTS = 'payroll_period_employee_snapshots';
 const GROUPS = 'salary_rate_groups';
 const COLUMNS = 'salary_rate_columns';
 const RATE_VALUES = 'salary_rate_values';
+const VERSION_RATE_VALUES = 'salary_rate_version_values';
 const RECORDS = 'teaching_attendance_records';
 const GROUP_DEFS = [
   { key: 'TEACHING', label: 'Tiết dạy', aliases: ['teaching', 'tiet day'] },
@@ -86,6 +87,8 @@ export default function Page() {
   const [groups, setGroups] = useState([]);
   const [columns, setColumns] = useState([]);
   const [rateValues, setRateValues] = useState([]);
+  const [versionRateValues, setVersionRateValues] = useState([]);
+  const [rateVersions,setRateVersions]=useState([]);
   const [records, setRecords] = useState([]);
   const [tab, setTab] = useState('TEACHING');
   const [search, setSearch] = useState('');
@@ -99,6 +102,7 @@ export default function Page() {
 
   const selectedPeriod = useMemo(() => periods.find(p => p.id === periodId) || null, [periods, periodId]);
   const policyId = selectedPeriod?.salary_version_id || '';
+  useEffect(()=>{const v=rateVersions.find(x=>x.id===selectedPeriod?.salary_rate_version_id);if(v){if(Array.isArray(v.groups_snapshot)&&v.groups_snapshot.length)setGroups(v.groups_snapshot);if(Array.isArray(v.columns_snapshot)&&v.columns_snapshot.length)setColumns(v.columns_snapshot);}},[selectedPeriod?.salary_rate_version_id,rateVersions]);
   const locked = isLocked(selectedPeriod);
   const groupRows = useMemo(() => {
     const mapped = groups.filter(g => g.active !== false).map(g => ({ ...g, normalizedCode: groupCode(g) })).filter(g => g.normalizedCode);
@@ -111,7 +115,8 @@ export default function Page() {
     const map = new Map();
     // Merge column values across policy rows. Choosing a whole row can hide the
     // other columns when a row contains only a partial values object.
-    const ordered = [...rateValues].sort((a,b) => Number(String(b.policy_version_id||'')===String(policyId||'')) - Number(String(a.policy_version_id||'')===String(policyId||'')));
+    const sourceRows = selectedPeriod?.salary_rate_version_id ? versionRateValues.filter(v=>v.rate_version_id===selectedPeriod.salary_rate_version_id) : rateValues;
+    const ordered = [...sourceRows].sort((a,b) => Number(String(b.policy_version_id||'')===String(policyId||'')) - Number(String(a.policy_version_id||'')===String(policyId||'')));
     for (const row of ordered) {
       const key = `${row.employee_id}|${row.group_id}`;
       const merged = { ...(map.get(key) || {}) };
@@ -122,7 +127,7 @@ export default function Page() {
       map.set(key, merged);
     }
     return map;
-  }, [rateValues, policyId]);
+  }, [rateValues, versionRateValues, policyId, selectedPeriod?.salary_rate_version_id]);
   const recordMap = useMemo(() => new Map(records.map(r => [`${r.employee_id}|${r.salary_rate_column_id}`, Number(r.lesson_count || 0)])), [records]);
   const visibleEmployees = useMemo(() => snapshots.filter(e => {
     const hay = norm([e.employee_code_snapshot, e.employee_name_snapshot, e.department_snapshot, e.position_snapshot].join(' '));
@@ -150,11 +155,13 @@ export default function Page() {
     }
     setLoading(true); setNotice(null);
     try {
-      const [periodRows, groupRowsResult, columnRows, policyRows] = await Promise.all([
-        fetchAll(() => supabase.from(PERIODS).select('id,period_code,period_year,period_month,salary_version_id,status,created_at').order('period_year', { ascending: false }).order('period_month', { ascending: false })),
+      const [periodRows, groupRowsResult, columnRows, policyRows, versionPolicyRows, rateVersionRows] = await Promise.all([
+        fetchAll(() => supabase.from(PERIODS).select('id,period_code,period_year,period_month,salary_version_id,salary_rate_version_id,status,created_at').order('period_year', { ascending: false }).order('period_month', { ascending: false })),
         supabase.from(GROUPS).select('*').order('sort_order').order('name'),
         supabase.from(COLUMNS).select('*').order('display_order').order('name'),
         fetchAll(() => supabase.from(RATE_VALUES).select('employee_id,group_id,policy_version_id,values')),
+        fetchAll(() => supabase.from(VERSION_RATE_VALUES).select('employee_id,group_id,rate_version_id,values')),
+        fetchAll(() => supabase.from('salary_rate_versions').select('*')),
       ]);
       for (const result of [groupRowsResult, columnRows]) if (result.error) throw result.error;
       const nextPeriods = periodRows || [];
@@ -162,6 +169,8 @@ export default function Page() {
       setGroups(groupRowsResult.data || []);
       setColumns(columnRows.data || []);
       setRateValues(policyRows || []);
+      setVersionRateValues(versionPolicyRows || []);
+      setRateVersions(rateVersionRows || []);
       const nextId = periodId && nextPeriods.some(p => p.id === periodId) ? periodId : nextPeriods[0]?.id || '';
       setPeriodId(nextId);
       if (!nextId) {

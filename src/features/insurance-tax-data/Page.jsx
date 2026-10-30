@@ -60,7 +60,7 @@ const periodLabel=p=>`${p.code||p.name||'Kỳ lương'} · ${p.month||p.start_da
 export default function Page(){
  const [periods,setPeriods]=useState([]),[periodId,setPeriodId]=useState(''),[rows,setRows]=useState([]),[tab,setTab]=useState('insurance'),[search,setSearch]=useState(''),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[message,setMessage]=useState(null),[editing,setEditing]=useState(null),[draft,setDraft]=useState(null),[showTaxSettings,setShowTaxSettings]=useState(false),[taxConfig,setTaxConfig]=useState({personal_relief_amount:15500000,dependent_relief_amount:6200000}),[configDraft,setConfigDraft]=useState(null);
  const load=useCallback(async()=>{if(!supabase||!isSupabaseConfigured){setMessage({type:'error',text:'Chưa cấu hình Supabase. Không thể tải hoặc lưu dữ liệu.'});setLoading(false);return;}setLoading(true);setMessage(null);try{
-  const [pr,sn,ins,deps,com,sup,periodData,tax,masterResult,groupsResult,columnsResult,ratesResult,teachingResult,adjustmentsResult,policiesResult]=await Promise.all([
+  const [pr,sn,ins,deps,com,sup,periodData,tax,masterResult,groupsResult,columnsResult,ratesResult,versionRatesResult,rateVersionRowsResult,teachingResult,adjustmentsResult,policiesResult]=await Promise.all([
    supabase.from(PERIODS).select('*').order('month',{ascending:false,nullsFirst:false}).order('created_at',{ascending:false}),
    supabase.from(SNAPSHOTS).select('*').order('employee_code'),
    supabase.from(INSURANCE).select('*'),supabase.from(DEPENDENTS).select('*'),supabase.from(COMMITMENTS).select('*'),supabase.from(SUPPORT).select('*'),
@@ -69,21 +69,24 @@ export default function Page(){
    supabase.from('salary_rate_groups').select('*'),
    supabase.from('salary_rate_columns').select('*'),
    supabase.from('salary_rate_values').select('*'),
+   supabase.from('salary_rate_version_values').select('*'),
+   supabase.from('salary_rate_versions').select('*'),
    supabase.from('teaching_attendance_records').select('*'),
    supabase.from('payroll_adjustments').select('*'),
    supabase.from('salary_policy_versions').select('id,code,status,effective_from,effective_to').order('effective_from',{ascending:false})
   ]);
-  for(const [name,r] of [['Kỳ lương',pr],['Danh sách nhân sự kỳ lương',sn],['Hồ sơ BHXH',ins],['Người phụ thuộc',deps],['Cam kết thu nhập',com],['Mức hỗ trợ',sup],['Dữ liệu BHXH/thuế theo kỳ',periodData],['Cấu hình giảm trừ',tax],['Nhân Sự Master',masterResult],['Nhóm định mức lương',groupsResult],['Cột định mức lương',columnsResult],['Giá trị định mức lương',ratesResult],['Chấm Tiết',teachingResult],['Khoản Cộng Trừ',adjustmentsResult],['Phiên bản chính sách lương',policiesResult]])if(r.error)throw new Error(`${name}: ${r.error.message}`);
+  for(const [name,r] of [['Kỳ lương',pr],['Danh sách nhân sự kỳ lương',sn],['Hồ sơ BHXH',ins],['Người phụ thuộc',deps],['Cam kết thu nhập',com],['Mức hỗ trợ',sup],['Dữ liệu BHXH/thuế theo kỳ',periodData],['Cấu hình giảm trừ',tax],['Nhân Sự Master',masterResult],['Nhóm định mức lương',groupsResult],['Cột định mức lương',columnsResult],['Giá trị định mức lương',ratesResult],['Phiên bản định mức',versionRatesResult],['Cấu hình phiên bản định mức',rateVersionRowsResult],['Chấm Tiết',teachingResult],['Khoản Cộng Trừ',adjustmentsResult],['Phiên bản chính sách lương',policiesResult]])if(r.error)throw new Error(`${name}: ${r.error.message}`);
   setPeriods(pr.data||[]);setTaxConfig(tax.data||{personal_relief_amount:15500000,dependent_relief_amount:6200000});
   const selected=periodId||(pr.data||[]).find(p=>p.type==='FIXED'&&p.status!=='DRAFT')?.id||(pr.data||[])[0]?.id||'';setPeriodId(selected);
   const chosen=(pr.data||[]).find(p=>p.id===selected);const members=(sn.data||[]).filter(s=>s.period_id===selected);const masterRows=masterResult.data||[];const masterById=new Map(masterRows.map(e=>[String(e.id),e]));const masterByCode=new Map(masterRows.map(e=>[norm(e.employee_code||e.code||'' ).toLocaleUpperCase('vi'),e]).filter(([code])=>code));
-  const groupRows=groupsResult.data||[], columnRows=columnsResult.data||[], rateRows=ratesResult.data||[], lessonRows=(teachingResult.data||[]).filter(x=>x.period_id===selected), adjustmentRows=adjustmentsResult.data||[];
+  const selectedRateVersion=(rateVersionRowsResult.data||[]).find(v=>v.id===chosen?.salary_rate_version_id);const groupRows=(selectedRateVersion?.groups_snapshot?.length?selectedRateVersion.groups_snapshot:groupsResult.data)||[], columnRows=(selectedRateVersion?.columns_snapshot?.length?selectedRateVersion.columns_snapshot:columnsResult.data)||[], rateRows=ratesResult.data||[], lessonRows=(teachingResult.data||[]).filter(x=>x.period_id===selected), adjustmentRows=adjustmentsResult.data||[];
   const activePolicy=(policiesResult.data||[]).find(p=>p.id===(chosen?.salary_version_id||chosen?.salary_policy_version_id))||(policiesResult.data||[]).find(p=>String(p.status||'').toUpperCase()==='ACTIVE')||(policiesResult.data||[])[0];
-  const activeRates=rateRows.filter(v=>!activePolicy?.id||v.policy_version_id===activePolicy.id);
+  const selectedVersionRates=(versionRatesResult.data||[]).filter(v=>v.rate_version_id===chosen?.salary_rate_version_id);
+  const activeRates=chosen?.salary_rate_version_id?selectedVersionRates:rateRows.filter(v=>!activePolicy?.id||v.policy_version_id===activePolicy.id);
   const groupById=new Map(groupRows.map(g=>[g.id,g]));const columnById=new Map(columnRows.map(c=>[c.id,c]));
   // Resolve each column independently. Do not collapse salary_rate_values to one
   // object per employee/group: separate policy rows may hold different columns.
-  const rateRowsFor=(employeeId,groupId)=>rateRows
+  const rateRowsFor=(employeeId,groupId)=>activeRates
     .filter(v=>String(v.employee_id||'')===String(employeeId||'')&&String(v.group_id||'')===String(groupId||''))
     .sort((a,b)=>Number(Boolean(activePolicy?.id&&String(b.policy_version_id||'')===String(activePolicy.id)))-Number(Boolean(activePolicy?.id&&String(a.policy_version_id||'')===String(activePolicy.id))));
   const rateForColumn=(employeeId,groupId,col)=>{

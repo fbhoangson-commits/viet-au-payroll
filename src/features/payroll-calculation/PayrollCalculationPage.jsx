@@ -143,13 +143,15 @@ export default function PayrollCalculationPage({ page }) {
       const selectedId=(keepPeriod && periodId && fixedPeriods.some(p=>p.id===periodId)) ? periodId : (fixedPeriods[0]?.id || '');
       setPeriodId(selectedId);
       if(!selectedId){setRows([]);setWarnings(['Chưa có Kỳ Lương tháng (FIXED). Hãy tạo Kỳ Lương trong menu Quản lý Kỳ Lương.']);setDataLoaded(true);return;}
-      const [snapshotA,snapshotB,employees,groups,columns,rateValues,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles,taxConfigs,commitments,policyVersions] = await Promise.all([
+      const [snapshotA,snapshotB,employees,groups,columns,rateValues,versionRateValues,rateVersionRows,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles,taxConfigs,commitments,policyVersions] = await Promise.all([
         fetchRows('payroll_period_employees','Danh sách nhân sự kỳ',notes),
         fetchRows('payroll_period_employee_snapshots','Snapshot nhân sự kỳ',notes),
         fetchRows('employees','Employee Master',notes,true),
         fetchRows('salary_rate_groups','Nhóm định mức',notes),
         fetchRows('salary_rate_columns','Cột định mức',notes),
-        fetchRows('salary_rate_values','Giá trị định mức',notes),
+        fetchRows('salary_rate_values','Giá trị định mức cũ',notes),
+        fetchRows('salary_rate_version_values','Giá trị phiên bản định mức',notes),
+        fetchRows('salary_rate_versions','Cấu hình phiên bản định mức',notes),
         fetchRows('teaching_attendance_records','Chấm Công Tiết Dạy',notes),
         fetchRows('payroll_adjustments','Khoản cộng trừ',notes),
         fetchRows('payroll_period_insurance_tax_data','Dữ liệu BHXH/thuế kỳ',notes),
@@ -165,18 +167,24 @@ export default function PayrollCalculationPage({ page }) {
       const snapshotsRaw=snapshotA.filter(r=>rowPeriodId(r)===selectedId);
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
       const masterById=new Map(employees.map(e=>[clean(e.id),e]));
-      const groupsById=new Map(groups.map(g=>[clean(g.id),g]));
       const selectedPeriod=fixedPeriods.find(p=>p.id===selectedId)||{};
+      const selectedRateVersion=(rateVersionRows||[]).find(v=>v.id===selectedPeriod.salary_rate_version_id);
+      const effectiveGroups=Array.isArray(selectedRateVersion?.groups_snapshot)&&selectedRateVersion.groups_snapshot.length?selectedRateVersion.groups_snapshot:groups;
+      const effectiveColumns=Array.isArray(selectedRateVersion?.columns_snapshot)&&selectedRateVersion.columns_snapshot.length?selectedRateVersion.columns_snapshot:columns;
+      const groupsById=new Map(effectiveGroups.map(g=>[clean(g.id),g]));
       const activePolicy=(policyVersions||[]).find(p=>p.id===(selectedPeriod.salary_version_id||selectedPeriod.salary_policy_version_id))||(policyVersions||[]).find(p=>String(p.status||'').toUpperCase()==='ACTIVE')||(policyVersions||[])[0];
-      const columnsById=new Map(columns.map(c=>[clean(c.id),c]));
+      const columnsById=new Map(effectiveColumns.map(c=>[clean(c.id),c]));
       const valuesByEmployee=new Map();
       // Prefer the period's policy, but retain a fallback to the employee's saved rate rows when the policy link is absent/mismatched.
-      const policyRateValues=rateValues.filter(v=>!activePolicy?.id || v.policy_version_id===activePolicy.id);
+      const selectedVersionRows = selectedPeriod.salary_rate_version_id
+        ? versionRateValues.filter(v=>v.rate_version_id===selectedPeriod.salary_rate_version_id)
+        : [];
+      const policyRateValues=selectedPeriod.salary_rate_version_id ? selectedVersionRows : rateValues.filter(v=>!activePolicy?.id || v.policy_version_id===activePolicy.id);
       for(const r of policyRateValues) {
         const key=employeeId(r); if(!valuesByEmployee.has(key)) valuesByEmployee.set(key,[]);
         valuesByEmployee.get(key).push(r);
       }
-      const selectedRateColumns=columns.filter(c=>c.is_active!==false);
+      const selectedRateColumns=effectiveColumns.filter(c=>c.is_active!==false);
       const rateGroupName = c => { const g=groupsById.get(clean(c.group_id)); return norm(`${g?.code || ''} ${g?.name || ''}`); };
       const isFixedGroup = c => { const n=rateGroupName(c); return n.includes('fixed') || n.includes('co dinh'); };
       const isTeachingColumn = c => { const n=rateGroupName(c); return n.includes('tiet day') || n.includes('phu dao') || n.includes('khac') || n.includes('other') || n.includes('teaching') || n.includes('tutoring'); };

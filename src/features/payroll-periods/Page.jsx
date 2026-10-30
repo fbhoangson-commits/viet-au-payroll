@@ -22,7 +22,7 @@ const normHeader = value => clean(value).toLocaleLowerCase('vi').normalize('NFD'
 const employeeCode = row => clean(row.employee_code || row.code || row.ma_nhan_vien || row['Mã Nhân Viên']).toUpperCase();
 const employeeName = row => row.full_name || row.name || row.employee_name || row['Họ và Tên'] || employeeCode(row) || 'Chưa có tên';
 const inactive = row => /nghi|inactive|terminated|resigned|da nghi/i.test(String(row.status || row.employment_status || ''));
-const defaultForm = type => ({ type, name: '', month: monthNow(), start_date: `${monthNow()}-01`, end_date: '', description: '', status: 'DRAFT', salary_version_id: '' });
+const defaultForm = type => ({ type, name: '', month: monthNow(), start_date: `${monthNow()}-01`, end_date: '', description: '', status: 'DRAFT', salary_version_id: '', salary_rate_version_id: '' });
 const DEFAULT_COLUMNS = [
   { key: 'meal', label: 'Ăn trưa', data_type: 'currency', required: false, display_order: 1, is_active: true },
   { key: 'phone', label: 'Điện thoại', data_type: 'currency', required: false, display_order: 2, is_active: true },
@@ -35,6 +35,7 @@ export default function Page() {
   const [periods, setPeriods] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [salaryPolicies, setSalaryPolicies] = useState([]);
+  const [salaryRateVersions, setSalaryRateVersions] = useState([]);
   const [columns, setColumns] = useState([]);
   const [values, setValues] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -57,17 +58,20 @@ export default function Page() {
     if (!supabase || !isSupabaseConfigured) { setError('Chưa cấu hình Supabase. Không thể tải hoặc lưu kỳ lương.'); setLoading(false); return; }
     setLoading(true); setError('');
     try {
-      const [periodResult, employeeResult, policyResult] = await Promise.all([
+      const [periodResult, employeeResult, policyResult, rateVersionResult] = await Promise.all([
         supabase.from(TABLE).select('*').order('created_at', { ascending: false }),
         supabase.from('employees').select('*').order('employee_code', { ascending: true, nullsFirst: false }),
         supabase.from('salary_policy_versions').select('id,code,name,status,effective_from,effective_to').order('effective_from', { ascending: false }),
+        supabase.from('salary_rate_versions').select('id,policy_version_id,code,name').order('created_at', { ascending: true }),
       ]);
       if (periodResult.error) throw periodResult.error;
       if (employeeResult.error) throw new Error(`Không tải được Nhân Sự Master: ${employeeResult.error.message}`);
       if (policyResult.error) throw new Error(`Không tải được Chính Sách Lương: ${policyResult.error.message}`);
+      if (rateVersionResult.error) throw new Error(`Không tải được Phiên Bản Định Mức: ${rateVersionResult.error.message}`);
       setPeriods(periodResult.data || []);
       setEmployees(employeeResult.data || []);
       setSalaryPolicies(policyResult.data || []);
+      setSalaryRateVersions(rateVersionResult.data || []);
       if (preserveSelected && selected) {
         const current = (periodResult.data || []).find(p => p.id === selected.id);
         if (current) setSelected(current); else setSelected(null);
@@ -102,12 +106,15 @@ export default function Page() {
   }, [periods, tab, statusFilter, search]);
 
   const openCreate = () => { setEditingId(null); setForm(defaultForm(tab)); setShowForm(true); setSelected(null); setError(''); setMessage(''); };
-  const openEdit = period => { setEditingId(period.id); setForm({ type: period.type, name: period.name || '', month: period.month || monthNow(), start_date: period.start_date || `${period.month || monthNow()}-01`, end_date: period.end_date || '', description: period.description || '', status: period.status || 'DRAFT', salary_version_id: period.salary_version_id || '' }); setShowForm(true); setError(''); setMessage(''); };
+  const openEdit = period => { setEditingId(period.id); setForm({ type: period.type, name: period.name || '', month: period.month || monthNow(), start_date: period.start_date || `${period.month || monthNow()}-01`, end_date: period.end_date || '', description: period.description || '', status: period.status || 'DRAFT', salary_version_id: period.salary_version_id || '', salary_rate_version_id: period.salary_rate_version_id || '' }); setShowForm(true); setError(''); setMessage(''); };
   const savePeriod = async event => {
     event.preventDefault(); if (!supabase || saving) return;
     if (!form.name.trim()) { setError('Vui lòng nhập tên kỳ.'); return; }
     if (form.type === 'FIXED' && !form.month) { setError('Vui lòng chọn tháng/năm kỳ lương.'); return; }
     if (!form.salary_version_id) { setError('Vui lòng chọn Chính Sách Lương áp dụng cho kỳ này.'); return; }
+    if (!form.salary_rate_version_id) { setError('Vui lòng chọn Phiên Bản Định Mức áp dụng cho kỳ này.'); return; }
+    const chosenRateVersion = salaryRateVersions.find(v => v.id === form.salary_rate_version_id && v.policy_version_id === form.salary_version_id);
+    if (!chosenRateVersion) { setError('Phiên Bản Định Mức không thuộc Chính Sách Lương đã chọn.'); return; }
     const chosenPolicy = salaryPolicies.find(p => p.id === form.salary_version_id);
     if (!chosenPolicy) { setError('Chính Sách Lương đã chọn không còn tồn tại. Vui lòng tải lại danh sách và chọn lại.'); return; }
     if (!editingId && String(chosenPolicy.status).toUpperCase() !== 'ACTIVE') { setError('Chỉ được tạo kỳ mới với Chính Sách Lương đang hoạt động.'); return; }
@@ -124,7 +131,7 @@ export default function Page() {
       const code = editingId ? periods.find(p => p.id === editingId)?.code : makeCode(form.type === 'FIXED' ? 'FIXED' : 'EVENT', monthForCode, sameMonthCount + 1);
       const legacyMonth = form.type === 'FIXED' ? form.month : (form.start_date || today()).slice(0, 7);
       const [legacyYear, legacyMonthNumber] = legacyMonth.split('-').map(Number);
-      const payload = { code, period_code: code, type: form.type, name: form.name.trim(), salary_version_id: form.salary_version_id, month: form.type === 'FIXED' ? form.month : null, period_year: legacyYear, period_month: legacyMonthNumber, start_date: form.start_date || null, end_date: form.end_date || null, description: form.description.trim() || null, status: editingId ? form.status : 'DRAFT', employee_count: editingId ? (periods.find(p => p.id === editingId)?.employee_count || 0) : currentEmployees.length, updated_at: new Date().toISOString() };
+      const payload = { code, period_code: code, type: form.type, name: form.name.trim(), salary_version_id: form.salary_version_id, salary_rate_version_id: form.salary_rate_version_id, month: form.type === 'FIXED' ? form.month : null, period_year: legacyYear, period_month: legacyMonthNumber, start_date: form.start_date || null, end_date: form.end_date || null, description: form.description.trim() || null, status: editingId ? form.status : 'DRAFT', employee_count: editingId ? (periods.find(p => p.id === editingId)?.employee_count || 0) : currentEmployees.length, updated_at: new Date().toISOString() };
       let result;
       if (editingId) result = await supabase.from(TABLE).update(payload).eq('id', editingId).select('*').single();
       else result = await supabase.from(TABLE).insert(payload).select('*').single();
@@ -328,7 +335,8 @@ export default function Page() {
     {showForm && <section className="pp-card"><div className="pp-card-heading"><div><h3>{editingId ? 'Chỉnh sửa kỳ' : tab === 'FIXED' ? 'Tạo Kỳ Lương Tháng Cố Định' : 'Tạo Kỳ Phát Sinh'}</h3><p>{editingId ? 'Chỉ cập nhật thông tin kỳ, không tạo lại snapshot nhân sự.' : tab === 'FIXED' ? 'Mỗi tháng chỉ có một kỳ; danh sách nhân sự được chốt tại thời điểm tạo.' : 'Kỳ phát sinh được tạo độc lập, có thể cấu hình cột sau khi tạo.'}</p></div><button className="pp-icon-button" onClick={() => setShowForm(false)} aria-label="Đóng"><X size={16}/></button></div>
       <form className="pp-form" onSubmit={savePeriod}>
         {tab === 'FIXED' && <label>Tháng/năm <span>*</span><input type="month" required value={form.month} disabled={Boolean(editingId)} onChange={e => setForm(v => ({ ...v, month: e.target.value, start_date: `${e.target.value}-01` }))}/></label>}
-        <label className="pp-form-wide">Chính Sách Lương áp dụng <span>*</span><select required value={form.salary_version_id} disabled={Boolean(editingId)} onChange={e => setForm(v => ({ ...v, salary_version_id: e.target.value }))}><option value="">-- Chọn chính sách lương --</option>{salaryPolicies.filter(p => String(p.status).toUpperCase() === 'ACTIVE' || p.id === form.salary_version_id).map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} ({dateLabel(p.effective_from)}{p.effective_to ? ` đến ${dateLabel(p.effective_to)}` : ' trở đi'})</option>)}</select>{!salaryPolicies.some(p => String(p.status).toUpperCase() === 'ACTIVE') && <small>Chưa có chính sách lương đang hoạt động. Hãy tạo/kích hoạt chính sách trước.</small>}</label>
+        <label className="pp-form-wide">Chính Sách Lương áp dụng <span>*</span><select required value={form.salary_version_id} disabled={Boolean(editingId)} onChange={e => { const policyId=e.target.value; const first=salaryRateVersions.find(v=>v.policy_version_id===policyId); setForm(v => ({ ...v, salary_version_id: policyId, salary_rate_version_id: first?.id || '' })); }}><option value="">-- Chọn chính sách lương --</option>{salaryPolicies.filter(p => String(p.status).toUpperCase() === 'ACTIVE' || p.id === form.salary_version_id).map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} ({dateLabel(p.effective_from)}{p.effective_to ? ` đến ${dateLabel(p.effective_to)}` : ' trở đi'})</option>)}</select>{!salaryPolicies.some(p => String(p.status).toUpperCase() === 'ACTIVE') && <small>Chưa có chính sách lương đang hoạt động. Hãy tạo/kích hoạt chính sách trước.</small>}</label>
+        <label className="pp-form-wide">Phiên Bản Định Mức áp dụng <span>*</span><select required value={form.salary_rate_version_id} disabled={Boolean(editingId)} onChange={e=>setForm(v=>({...v,salary_rate_version_id:e.target.value}))}><option value="">-- Chọn phiên bản định mức --</option>{salaryRateVersions.filter(v=>v.policy_version_id===form.salary_version_id).map(v=><option key={v.id} value={v.id}>{v.code} — {v.name}</option>)}</select><small>Kỳ lương sẽ sử dụng đúng bộ định mức của phiên bản này.</small></label>
         <label className="pp-form-wide">Tên kỳ <span>*</span><input required maxLength={180} value={form.name} placeholder={tab === 'FIXED' ? 'VD: Kỳ lương tháng 09/2026' : 'VD: Kỳ thưởng thành tích 2026'} onChange={e => setForm(v => ({ ...v, name: e.target.value }))}/></label>
         <label>Ngày bắt đầu<input type="date" value={form.start_date || ''} onChange={e => setForm(v => ({ ...v, start_date: e.target.value }))}/></label><label>Ngày kết thúc<input type="date" min={form.start_date || undefined} value={form.end_date || ''} onChange={e => setForm(v => ({ ...v, end_date: e.target.value }))}/></label>
         <label>Trạng thái<select value={editingId ? form.status : 'DRAFT'} disabled={!editingId} onChange={e => setForm(v => ({ ...v, status: e.target.value }))}><option value="DRAFT">Bản nháp</option><option value="OPEN">Đang mở</option><option value="CLOSED">Đã đóng</option></select></label>
