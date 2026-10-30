@@ -38,7 +38,7 @@ export default function Page(){
  const [items,setItems]=useState([]),[employees,setEmployees]=useState([]),[periods,setPeriods]=useState([]),[taxSettings,setTaxSettings]=useState(DEFAULT_TAX),[showTaxSettings,setShowTaxSettings]=useState(false),[taxDraft,setTaxDraft]=useState(DEFAULT_TAX);
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  const [search,setSearch]=useState(''),[typeFilter,setTypeFilter]=useState('ALL'),[statusFilter,setStatusFilter]=useState('ALL'),[linkFilter,setLinkFilter]=useState('ALL'),[monthFilter,setMonthFilter]=useState(''),[dateFrom,setDateFrom]=useState(''),[dateTo,setDateTo]=useState('');
- const [form,setForm]=useState(blank()),[editing,setEditing]=useState(null),[showForm,setShowForm]=useState(false),[employeeSearch,setEmployeeSearch]=useState(''),[attachmentFile,setAttachmentFile]=useState(null);
+ const [form,setForm]=useState(blank()),[editing,setEditing]=useState(null),[showForm,setShowForm]=useState(false),[employeeSearch,setEmployeeSearch]=useState(''),[employeePickerOpen,setEmployeePickerOpen]=useState(false),[attachmentFile,setAttachmentFile]=useState(null);
  const [selected,setSelected]=useState([]),[showLink,setShowLink]=useState(false),[periodId,setPeriodId]=useState(''),[linking,setLinking]=useState(false);
  const [importPreview,setImportPreview]=useState(null);const fileRef=useRef(null);
  const load=useCallback(async()=>{
