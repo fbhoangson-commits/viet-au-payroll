@@ -17,8 +17,26 @@ const periodName = p => clean(p?.name || p?.code || p?.period_code || p?.month |
 // Chuẩn hóa nhãn kỳ lương để banner/email hiển thị đúng dạng T09/2026,
 // kể cả khi dữ liệu có NBSP, ký tự zero-width hoặc tiền tố Lương viết hoa/thường.
 const periodDisplayName = value => {
-  const normalized = clean(value).normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ');
-  return normalized.replace(/^\s*lương\s*/i, '').trim() || normalized.trim();
+  const normalized = clean(value)
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Chuẩn hóa kỳ lương theo định dạng duy nhất TMM/YYYY.
+  // Không phụ thuộc period.name có tiền tố "Lương", "Kỳ lương" hay dấu phân cách.
+  const match = normalized.match(/\bT\s*0?(\d{1,2})\s*[\/-]\s*(\d{4})\b/i);
+  if (match) {
+    const month = Number(match[1]);
+    if (month >= 1 && month <= 12) return `T${String(month).padStart(2, '0')}/${match[2]}`;
+  }
+
+  // Dự phòng cho nhãn kỳ không theo dạng TMM/YYYY.
+  return normalized
+    .replace(/^\s*(?:kỳ\s+)?lương\s*[:：-]?\s*/i, '')
+    .trim() || normalized;
 };
 const validEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(v));
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
