@@ -27,7 +27,7 @@ export default function Page(){
       const [p,r,e]=await Promise.all([
         supabase.from('payroll_periods').select('*').order('created_at',{ascending:false}),
         supabase.from('payroll_runs').select('*').order('created_at',{ascending:false}),
-        supabase.from('employees').select('id,employee_code,full_name,name,email,status,department,position,job_title').order('employee_code',{ascending:true,nullsFirst:false})
+        supabase.from('employees').select('*').order('employee_code',{ascending:true,nullsFirst:false})
       ]);
       if(p.error)throw new Error(`Không tải được kỳ lương: ${p.error.message}`);
       if(r.error)throw new Error(`Không tải được phiên bản lương: ${r.error.message}`);
