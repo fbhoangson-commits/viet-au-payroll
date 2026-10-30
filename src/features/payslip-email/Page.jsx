@@ -14,13 +14,20 @@ const official = r => ['APPROVED','LOCKED'].includes(clean(r?.status).toUpperCas
 const statusText = v => ({DRAFT:'Bản nháp',PENDING:'Chờ duyệt',SUBMITTED:'Chờ duyệt',APPROVED:'Đã duyệt',REJECTED:'Từ chối',LOCKED:'Đã khóa'}[clean(v).toUpperCase()] || v || 'Chưa xác định');
 const getRows = s => { if(Array.isArray(s))return s; for(const k of ['results','rows','employees','payroll_results','employee_results','details'])if(Array.isArray(s?.[k]))return s[k]; return []; };
 const periodName = p => clean(p?.name || p?.code || p?.period_code || p?.month || 'Kỳ lương');
+// Chuẩn hóa nhãn kỳ lương để banner/email hiển thị đúng dạng T09/2026,
+// kể cả khi dữ liệu có NBSP, ký tự zero-width hoặc tiền tố Lương viết hoa/thường.
+const periodDisplayName = value => {
+  const normalized = clean(value).normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ');
+  return normalized.replace(/^\s*lương\s*/i, '').trim() || normalized.trim();
+};
 const validEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(v));
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const buildEmailMessage = ({row,period}) => {
   const employeeName = nameOf(row);
   const employeeCode = codeOf(row);
   const periodLabel = periodName(period);
-  const subject = `[VIỆT ÂU] PHIẾU LƯƠNG ${periodLabel} – ${employeeName}`;
+  const displayPeriod = periodDisplayName(periodLabel);
+  const subject = `[VIỆT ÂU] PHIẾU LƯƠNG ${displayPeriod} – ${employeeName}`;
   const gross = money(row?.gross_income);
   const net = money(row?.net_pay);
   const htmlBody = `
@@ -29,11 +36,11 @@ const buildEmailMessage = ({row,period}) => {
       <div style="padding:22px 28px;background:#10324d;color:#ffffff;">
         <div style="font-size:12px;letter-spacing:1.5px;font-weight:700;color:#8fe0d5;">TRƯỜNG THPT VIỆT ÂU</div>
         <div style="font-size:21px;line-height:1.35;font-weight:700;margin-top:8px;">PHIẾU LƯƠNG</div>
-        <div style="display:block;width:100%;font-size:16px;line-height:1.45;font-weight:600;margin-top:4px;">${esc(periodLabel.replace(/^Lương\s+/i, ''))}</div>
+        <div style="display:block;width:100%;font-size:16px;line-height:1.45;font-weight:600;margin-top:4px;">${esc(displayPeriod)}</div>
       </div>
       <div style="padding:26px 28px;">
         <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Kính gửi Thầy/Cô <strong>${esc(employeeName)}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:14px;line-height:1.7;">Trường THPT Việt Âu gửi Thầy/Cô phiếu lương ${esc(periodLabel)}. Thông tin tổng hợp được trình bày dưới đây; phiếu lương chi tiết được đính kèm dưới dạng PDF.</p>
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.7;">Trường THPT Việt Âu gửi Thầy/Cô phiếu lương ${esc(displayPeriod)}. Thông tin tổng hợp được trình bày dưới đây; phiếu lương chi tiết được đính kèm dưới dạng PDF.</p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 18px;font-size:14px;">
           <tr><td style="padding:11px 13px;background:#f2f6f9;border:1px solid #e0e8ef;color:#5e7488;width:42%;">Mã nhân viên</td><td style="padding:11px 13px;border:1px solid #e0e8ef;font-weight:700;">${esc(employeeCode)}</td></tr>
           <tr><td style="padding:11px 13px;background:#f2f6f9;border:1px solid #e0e8ef;color:#5e7488;">Tổng thu nhập</td><td style="padding:11px 13px;border:1px solid #e0e8ef;font-weight:700;">${esc(gross)}</td></tr>
@@ -45,7 +52,7 @@ const buildEmailMessage = ({row,period}) => {
       <div style="padding:13px 28px;background:#f7fafc;border-top:1px solid #e5edf2;color:#8293a2;font-size:11px;line-height:1.5;">Email được gửi tự động từ hệ thống quản trị tiền lương Việt Âu. Vui lòng không trả lời email này.</div>
     </div>
   </div>`;
-  const textBody = `Kính gửi Thầy/Cô ${employeeName},\n\nTrường THPT Việt Âu gửi Thầy/Cô phiếu lương ${periodLabel}.\n\nMã nhân viên: ${employeeCode}\nTổng thu nhập: ${gross}\nThực lĩnh: ${net}\n\nVui lòng xem file PDF đính kèm để kiểm tra đầy đủ các khoản thu nhập, khấu trừ và thông tin chi tiết của phiếu lương.\n\nTrân trọng,\nTRƯỜNG THPT VIỆT ÂU\nBe your best self.`;
+  const textBody = `Kính gửi Thầy/Cô ${employeeName},\n\nTrường THPT Việt Âu gửi Thầy/Cô phiếu lương ${displayPeriod}.\n\nMã nhân viên: ${employeeCode}\nTổng thu nhập: ${gross}\nThực lĩnh: ${net}\n\nVui lòng xem file PDF đính kèm để kiểm tra đầy đủ các khoản thu nhập, khấu trừ và thông tin chi tiết của phiếu lương.\n\nTrân trọng,\nTRƯỜNG THPT VIỆT ÂU\nBe your best self.`;
   return {subject,html_body:htmlBody,text_body:textBody};
 };
 
@@ -119,6 +126,6 @@ export default function Page(){
     </div>
     <div className="pe-banner warn"><AlertTriangle size={16} style={{verticalAlign:'middle',marginRight:6}}/><b>Điều kiện triển khai:</b> cần áp dụng migration hàng đợi, deploy hai Edge Function và cấu hình hai Supabase secrets theo README của bản vá trước khi gửi thật.</div>
     <div className="pe-card"><div className="pe-toolbar"><div><b>Lịch sử gửi email</b><div className="pe-muted">Tối đa 200 lượt gần nhất · chống gửi trùng theo nhân sự và phiên bản lương</div></div><span className="pe-pill">{history.length} bản ghi</span></div>{!history.length?<div className="pe-empty">Chưa có lịch sử gửi email.</div>:<div className="pe-table-wrap" style={{marginTop:12}}><table className="pe-table"><thead><tr><th>Thời điểm</th><th>Mã NV</th><th>Họ và tên</th><th>Email</th><th>Kỳ lương</th><th>Trạng thái</th><th>Lỗi gần nhất</th><th>Thao tác</th></tr></thead><tbody>{history.map(h=><tr key={h.id}><td>{dateTime(h.sent_at||h.created_at)}</td><td>{h.employee_code||'—'}</td><td>{h.employee_name||'—'}</td><td>{h.recipient_email}</td><td>{h.period_label}</td><td><span className={`pe-pill ${h.status==='SENT'?'good':h.status==='FAILED'?'bad':'warn'}`}>{({QUEUED:'Đang chờ',SENDING:'Đang gửi',SENT:'Đã gửi',FAILED:'Gửi lỗi',NEEDS_REVIEW:'Cần kiểm tra'})[h.status]||h.status}</span></td><td>{h.last_error||'—'}</td><td>{h.status==='FAILED'?<button className="pe-btn" disabled={sending} onClick={()=>retryFailed(h.batch_id)}>Gửi lại lô lỗi</button>:'—'}</td></tr>)}</tbody></table></div>}</div>
-    {preview&&<div className="pe-modal-bg" onMouseDown={e=>{if(e.target===e.currentTarget)setPreview(null);}}><div className="pe-modal" role="dialog" aria-modal="true" aria-label="Xem trước email phiếu lương"><div className="pe-modal-head"><div><div style={{fontSize:10,color:'#078f91',fontWeight:800}}>XEM TRƯỚC EMAIL</div><h2 style={{margin:'5px 0',fontSize:20}}>{nameOf(preview)} · {codeOf(preview)}</h2><div className="pe-muted">{periodName(period)} · Run #{run?.run_number}</div></div><button className="pe-btn" onClick={()=>setPreview(null)}><X size={16}/> Đóng</button></div><div className="pe-preview"><b>Người nhận:</b> {preview._email||'Chưa có email'}<br/><b>Tiêu đề:</b> [VIỆT ÂU] PHIẾU LƯƠNG {periodName(period)} – {nameOf(preview)}<br/><br/>Kính gửi Thầy/Cô {nameOf(preview)},<br/><br/>Trường THPT Việt Âu gửi Thầy/Cô phiếu lương {periodName(period)}.<br/><br/>Mã nhân viên: {codeOf(preview)}<br/>Tổng thu nhập: {money(preview.gross_income)}<br/>Thực lĩnh: {money(preview.net_pay)}<br/><br/>Phiếu lương chi tiết được tạo từ đúng mẫu phiếu lương của hệ thống và đính kèm dưới dạng PDF.<br/><br/>Trân trọng,<br/><b>TRƯỜNG THPT VIỆT ÂU</b><br/>Be your best self.</div><div className="pe-toolbar"><span className={`pe-pill ${validEmail(preview._email)?'good':'bad'}`}>{validEmail(preview._email)?'Email hợp lệ':'Không thể gửi: email chưa hợp lệ'}</span><span className="pe-muted">File dự kiến đính kèm: PHIEU_LUONG_{codeOf(preview)}_{String(period?.month||period?.code||period?.period_code||periodName(period)).replace(/[^0-9A-Za-z_-]/g,'_')}.pdf · PDF được tạo khi gửi</span></div></div></div>}
+    {preview&&<div className="pe-modal-bg" onMouseDown={e=>{if(e.target===e.currentTarget)setPreview(null);}}><div className="pe-modal" role="dialog" aria-modal="true" aria-label="Xem trước email phiếu lương"><div className="pe-modal-head"><div><div style={{fontSize:10,color:'#078f91',fontWeight:800}}>XEM TRƯỚC EMAIL</div><h2 style={{margin:'5px 0',fontSize:20}}>{nameOf(preview)} · {codeOf(preview)}</h2><div className="pe-muted">{periodName(period)} · Run #{run?.run_number}</div></div><button className="pe-btn" onClick={()=>setPreview(null)}><X size={16}/> Đóng</button></div><div className="pe-preview"><b>Người nhận:</b> {preview._email||'Chưa có email'}<br/><b>Tiêu đề:</b> [VIỆT ÂU] PHIẾU LƯƠNG {periodDisplayName(periodName(period))} – {nameOf(preview)}<br/><br/>Kính gửi Thầy/Cô {nameOf(preview)},<br/><br/>Trường THPT Việt Âu gửi Thầy/Cô phiếu lương {periodDisplayName(periodName(period))}.<br/><br/>Mã nhân viên: {codeOf(preview)}<br/>Tổng thu nhập: {money(preview.gross_income)}<br/>Thực lĩnh: {money(preview.net_pay)}<br/><br/>Phiếu lương chi tiết được tạo từ đúng mẫu phiếu lương của hệ thống và đính kèm dưới dạng PDF.<br/><br/>Trân trọng,<br/><b>TRƯỜNG THPT VIỆT ÂU</b><br/>Be your best self.</div><div className="pe-toolbar"><span className={`pe-pill ${validEmail(preview._email)?'good':'bad'}`}>{validEmail(preview._email)?'Email hợp lệ':'Không thể gửi: email chưa hợp lệ'}</span><span className="pe-muted">File dự kiến đính kèm: PHIEU_LUONG_{codeOf(preview)}_{String(period?.month||period?.code||period?.period_code||periodName(period)).replace(/[^0-9A-Za-z_-]/g,'_')}.pdf · PDF được tạo khi gửi</span></div></div></div>}
   </div>;
 }
