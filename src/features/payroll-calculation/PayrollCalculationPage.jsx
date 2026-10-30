@@ -31,10 +31,10 @@ const MENU = {
   'personal-income-tax': { title:'Thuế TNCN', description:'Tổng hợp căn cứ và kết quả thuế từ dữ liệu thuế đã cấu hình cho kỳ.', icon:Calculator },
   'payroll-summary': { title:'Tổng Hợp Lương', description:'Bảng tổng hợp kết quả lương theo từng nhân sự trong kỳ.', icon:FileSpreadsheet },
 };
-const moneyColumns = new Set(['fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','tax','taxAmount','gross','net','employerInsurance','difference']);
+const moneyColumns = new Set(['fixed','teaching','additions','employeeSupport','supportTax','deductions','insuranceEmployee','unionEmployee','tax','taxAmount','gross','net','employerInsurance','difference']);
 const colLabel = {
  code:'Mã Nhân Viên', name:'Họ và Tên', classification:'Phân loại', department:'Bộ phận', position:'Chức danh',
- fixed:'Lương Cố Định', teaching:'Thành Tiền Tiết Dạy', additions:'Khoản Cộng', deductions:'Khoản Trừ',
+ fixed:'Lương Cố Định', teaching:'Thành Tiền Tiết Dạy', additions:'Khoản Cộng', employeeSupport:'Hỗ Trợ Nhân Sự', supportTax:'Thuế Hỗ Trợ', deductions:'Khoản Trừ',
  insuranceEmployee:'BHXH NLĐ', unionEmployee:'Phí Công Đoàn NLĐ', employerInsurance:'BHXH đơn vị',
  tax:'Thu Nhập Chịu Thuế', taxable:'Thu Nhập Chịu Thuế', taxAmount:'Thuế TNCN', gross:'Tổng Thu Nhập', net:'Thực Lĩnh', status:'Trạng Thái Dữ Liệu',
  lessonCount:'Tổng Số Tiết', rateCount:'Số Cấu Phần Có Đơn Giá', taxable:'Thu Nhập Chịu Thuế',
@@ -143,7 +143,7 @@ export default function PayrollCalculationPage({ page }) {
       const selectedId=(keepPeriod && periodId && fixedPeriods.some(p=>p.id===periodId)) ? periodId : (fixedPeriods[0]?.id || '');
       setPeriodId(selectedId);
       if(!selectedId){setRows([]);setWarnings(['Chưa có Kỳ Lương tháng (FIXED). Hãy tạo Kỳ Lương trong menu Quản lý Kỳ Lương.']);setDataLoaded(true);return;}
-      const [snapshotA,snapshotB,employees,groups,columns,rateValues,versionRateValues,rateVersionRows,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,attendanceRecords,unionProfiles,taxConfigs,commitments,policyVersions] = await Promise.all([
+      const [snapshotA,snapshotB,employees,groups,columns,rateValues,versionRateValues,rateVersionRows,teachingRecords,adjustments,taxRows,insuranceProfiles,dependents,supportRows,supportPeriodLinks,attendanceRecords,unionProfiles,taxConfigs,commitments,policyVersions] = await Promise.all([
         fetchRows('payroll_period_employees','Danh sách nhân sự kỳ',notes),
         fetchRows('payroll_period_employee_snapshots','Snapshot nhân sự kỳ',notes),
         fetchRows('employees','Employee Master',notes,true),
@@ -157,7 +157,8 @@ export default function PayrollCalculationPage({ page }) {
         fetchRows('payroll_period_insurance_tax_data','Dữ liệu BHXH/thuế kỳ',notes),
         fetchRows('employee_insurance_profiles','Hồ sơ BHXH',notes),
         fetchRows('employee_tax_dependents','Người phụ thuộc',notes),
-        fetchRows('employee_support_allowances','Hỗ trợ nhân sự',notes),
+        fetchRows('employee_support_allowances','Hỗ trợ nhân sự cũ',notes),
+        fetchRows('employee_support_period_links','Khoản hỗ trợ nhân sự theo kỳ',notes),
         fetchRows('daily_attendance_records','Chấm công ngày',notes),
         fetchRows('employee_union_profiles','Hồ sơ Công đoàn',notes),
         fetchRows('payroll_tax_relief_config','Cấu hình giảm trừ thuế',notes),
@@ -168,6 +169,9 @@ export default function PayrollCalculationPage({ page }) {
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
       const masterById=new Map(employees.map(e=>[clean(e.id),e]));
       const selectedPeriod=fixedPeriods.find(p=>p.id===selectedId)||{};
+      const selectedSupportLinks=(supportPeriodLinks||[]).filter(r=>rowPeriodId(r)===selectedId&&r.employee_id);
+      const supportByEmployee=new Map();
+      for(const r of selectedSupportLinks){const k=employeeId(r);if(!supportByEmployee.has(k))supportByEmployee.set(k,{amount:0,tax:0,count:0,items:[]});const v=supportByEmployee.get(k);v.amount+=num(r.amount_snapshot);v.tax+=num(r.tax_amount_snapshot);v.count++;v.items.push(r);}
       const selectedRateVersion=(rateVersionRows||[]).find(v=>v.id===selectedPeriod.salary_rate_version_id);
       const effectiveGroups=Array.isArray(selectedRateVersion?.groups_snapshot)&&selectedRateVersion.groups_snapshot.length?selectedRateVersion.groups_snapshot:groups;
       const effectiveColumns=Array.isArray(selectedRateVersion?.columns_snapshot)&&selectedRateVersion.columns_snapshot.length?selectedRateVersion.columns_snapshot:columns;
@@ -289,6 +293,9 @@ export default function PayrollCalculationPage({ page }) {
         const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
         const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
         const deductions=deductRows.reduce((sum,r)=>sum+num(r.amount),0);
+        const employeeSupportData=supportByEmployee.get(id)||{amount:0,tax:0,count:0,items:[]};
+        const employeeSupport=employeeSupportData.amount;
+        const supportTax=employeeSupportData.tax;
         const tax=taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{};
         const hasTaxData=Boolean(tax.id || tax.employee_id || tax.employee_code || tax.employee_code_snapshot);
         const hasMasterProfile=Boolean(master.id);
@@ -300,7 +307,7 @@ export default function PayrollCalculationPage({ page }) {
         const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         const classification=classificationOf(master,s,tax);
         const employeeType=firstText(classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification,tax.employee_type,tax.employee_classification);
-        const gross=fixed+teaching+additions;
+        const gross=fixed+teaching+additions+employeeSupport;
         const dependentCount=dependentCountFor(id,code,master,s);
         const supportAmount=num(tax.support_amount ?? supportFor(id,code));
         const reliefPersonal=num(tax.personal_relief_amount ?? defaultTaxConfig.personal_relief_amount ?? 15500000);
@@ -311,11 +318,11 @@ export default function PayrollCalculationPage({ page }) {
         // A manual override is the only persisted taxable-income value that supersedes the source calculation.
         const taxInsuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
         const taxInsuranceAmount=(tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*taxInsuranceRate/100 : 0;
-        const calculatedTaxable=isPermanent ? Math.max(0,gross-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-taxInsuranceAmount) : Math.max(0,fixed+teaching+additions);
+        const calculatedTaxable=isPermanent ? Math.max(0,gross-employeeSupport-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-taxInsuranceAmount) : Math.max(0,fixed+teaching+additions);
         const taxable=Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:calculatedTaxable));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
         const taxAmount=estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
-        const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount;
+        const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
         if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
@@ -325,7 +332,7 @@ export default function PayrollCalculationPage({ page }) {
         const fixedComponentCount=rateCount;
         const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
         const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
-        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
+        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,employeeSupport,supportTax,supportCount:employeeSupportData.count,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
       }).sort((a,b)=>a.code.localeCompare(b.code,'vi',{numeric:true}));
       setRows(output);setWarnings(notes);setDataLoaded(true);
     } catch(e) {setError(errorText(e));setRows([]);setWarnings(notes);setDataLoaded(false);}
@@ -342,10 +349,10 @@ export default function PayrollCalculationPage({ page }) {
     return matches&&typeMatches;
   }),[rows,search,typeFilter]);
   const totals=useMemo(()=>rows.reduce((s,r)=>{
-    for(const key of ['fixed','teaching','additions','deductions','difference','insuranceEmployee','unionEmployee','employerInsurance','taxable','taxAmount','gross','net'])s[key]+=num(r[key]);
+    for(const key of ['fixed','teaching','additions','employeeSupport','supportTax','deductions','difference','insuranceEmployee','unionEmployee','employerInsurance','taxable','taxAmount','gross','net'])s[key]+=num(r[key]);
     s.lessonCount+=num(r.lessonCount); for(const k of Object.keys(r)) if(k.startsWith('fixedCol_')) s[k]=(s[k]||0)+num(r[k]); if(r.hasIssue)s.issues++;
     return s;
-  },{fixed:0,teaching:0,additions:0,deductions:0,difference:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxable:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
+  },{fixed:0,teaching:0,additions:0,employeeSupport:0,supportTax:0,deductions:0,difference:0,insuranceEmployee:0,unionEmployee:0,employerInsurance:0,taxable:0,taxAmount:0,gross:0,net:0,lessonCount:0,issues:0}),[rows]);
 
   // Save an immutable copy of the values already shown on screen.
   // Always create a new run; never overwrite an earlier payroll snapshot.
@@ -373,7 +380,7 @@ export default function PayrollCalculationPage({ page }) {
         department: r.department || '',
         position: r.position || '',
         fixed: num(r.fixed), teaching: num(r.teaching),
-        additions: num(r.additions), deductions: num(r.deductions),
+        additions: num(r.additions), employee_support: num(r.employeeSupport), support_tax: num(r.supportTax), deductions: num(r.deductions),
         insurance_employee: num(r.insuranceEmployee),
         employer_insurance: num(r.employerInsurance),
         union_employee: num(r.unionEmployee),
@@ -396,11 +403,11 @@ export default function PayrollCalculationPage({ page }) {
         totals: {
           employee_count: rows.length,
           fixed: num(totals.fixed), teaching: num(totals.teaching),
-          additions: num(totals.additions), deductions: num(totals.deductions),
+          additions: num(totals.additions), employee_support: num(totals.employeeSupport), support_tax: num(totals.supportTax), deductions: num(totals.deductions),
           insurance_employee: num(totals.insuranceEmployee),
           employer_insurance: num(totals.employerInsurance),
           union_employee: num(totals.unionEmployee),
-          taxable_income: num(totals.taxable), personal_income_tax: num(totals.taxAmount),
+          taxable_income: num(totals.taxable), personal_income_tax: num(totals.taxAmount), support_tax: num(totals.supportTax),
           gross_income: num(totals.gross), net_pay: num(totals.net),
         },
         results,
@@ -427,11 +434,11 @@ export default function PayrollCalculationPage({ page }) {
     if(page==='period-employees')return ['code','name','classification','department','position','status'];
     if(page==='fixed-salary')return ['code','name','classification',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('fixedCol_')).slice(0,4),'fixed','status'];
     if(page==='teaching-pay')return ['code','name',...Object.keys(rows[0]?.columnLabels||{}).filter(k=>k.startsWith('lesson_')),'lessonCount','teaching'];
-    if(page==='payroll-deductions')return ['code','name','additionCount','additions','deductionCount','deductions','difference','status'];
+    if(page==='payroll-deductions')return ['code','name','additionCount','additions','employeeSupport','supportTax','deductionCount','deductions','difference','status'];
     if(page==='insurance-union')return ['code','name','participates','insuranceEmployee','unionEmployee','taxable','taxAmount','status'];
-    if(page==='personal-income-tax')return ['code','name','classification','taxMethod','taxable','taxAmount','taxStatus'];
-    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
-    return ['code','name','classification','fixed','teaching','additions','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
+    if(page==='personal-income-tax')return ['code','name','classification','taxMethod','taxable','taxAmount','supportTax','taxStatus'];
+    if(page==='payroll-summary')return ['code','name','classification','fixed','teaching','additions','employeeSupport','supportTax','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
+    return ['code','name','classification','fixed','teaching','additions','employeeSupport','supportTax','deductions','insuranceEmployee','unionEmployee','taxable','taxAmount','gross','net','status'];
   },[page,rows]);
   const dynamicLabels = rows[0]?.columnLabels || {};
   const columnLabel = k => colLabel[k] || dynamicLabels[k] || k;
@@ -462,7 +469,7 @@ export default function PayrollCalculationPage({ page }) {
       {metric('Nhân sự trong kỳ',rows.length,Users)}
       {metric('Cần kiểm tra',totals.issues,AlertTriangle)}
       {metric('Tổng thu nhập',money(totals.gross),Wallet)}
-      {metric('Tổng khấu trừ NLĐ',money(totals.insuranceEmployee+totals.unionEmployee+totals.taxAmount+totals.deductions),ShieldCheck)}
+      {metric('Tổng khấu trừ NLĐ',money(totals.insuranceEmployee+totals.unionEmployee+totals.taxAmount+totals.supportTax+totals.deductions),ShieldCheck)}
       {metric('Tổng thực lĩnh',money(totals.net),CircleDollarSign)}
       {metric('Phí Công đoàn NLĐ',money(totals.unionEmployee),Calculator)}
       <div className="pc-period-status"><span>TRẠNG THÁI KỲ</span><strong>{selectedPeriod?statusTitle(selectedPeriod.status):'Chưa chọn kỳ'}</strong><small>{selectedPeriod?periodTitle(selectedPeriod):'Tạo kỳ trong menu Quản lý Kỳ Lương'}</small></div>

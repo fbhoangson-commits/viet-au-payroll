@@ -145,6 +145,7 @@ function printHtml({run,period,row,adds,deducts,approvals,breakdown}) {
     ['Lương cố định',first(row,['fixed','fixed_salary','base_salary'],null)],
     ['Tiết dạy và phụ đạo',first(row,['teaching','teaching_amount','lesson_amount'],null)],
     ['Khoản cộng',first(row,['additions','addition_total'],null)],
+    ['Hỗ trợ nhân sự',first(row,['employeeSupport','employee_support'],null)],
   ];
   const detailTable=(items,emptyText,showLessons=false)=>items.length?items.map(x=>`<tr><td>${escapeHtml(x.name)}</td>${showLessons?`<td class="num">${escapeHtml(x.quantity??'—')}</td><td class="num">${escapeHtml(x.rate===null||x.rate===undefined?'—':money(x.rate))}</td>`:''}<td class="num">${escapeHtml(x.amount===null||x.amount===undefined?'Chưa có dữ liệu':money(x.amount))}</td></tr>`).join(''):`<tr><td colspan="${showLessons?4:2}" class="empty">${emptyText}</td></tr>`;
   const fixedDetailHtml=detailTable(breakdown?.fixedRows||[],'Chưa có dữ liệu chi tiết 4 cấu phần lương cố định.');
@@ -154,6 +155,7 @@ function printHtml({run,period,row,adds,deducts,approvals,breakdown}) {
     ['BHXH người lao động',first(row,['insurance_employee','bhxh_employee'],null)],
     ['Phí Công đoàn người lao động',first(row,['union_employee','union_fee_employee'],null)],
     ['Thuế TNCN phải nộp',first(row,['personal_income_tax','tax_amount'],null)],
+    ['Thuế TNCN khấu trừ khoản hỗ trợ',first(row,['supportTax','support_tax'],null)],
   ];
   const cells=items=>items.filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<tr><td>${escapeHtml(k)}</td><td class="num">${escapeHtml(money(v))}</td></tr>`).join('')||'<tr><td colspan="2" class="empty">Không có dữ liệu chi tiết.</td></tr>';
   const lineTable=(items,empty)=>items.length?items.map((a,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(a.code||a.adjustment_code||'—')}</td><td>${escapeHtml(a.name||'Khoản chưa đặt tên')}</td><td>${escapeHtml(a.application_type==='FIXED'?'Cố định':'Theo kỳ')}</td><td>${escapeHtml(a.quantity??'—')}</td><td>${escapeHtml(a.unit||'—')}</td><td class="num">${escapeHtml(money(a.unit_price??a.amount))}</td><td class="num">${escapeHtml(money(a.amount))}</td><td>${escapeHtml(a.description||'—')}</td></tr>`).join(''):`<tr><td colspan="9" class="empty">${empty}</td></tr>`;
