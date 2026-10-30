@@ -34,6 +34,9 @@ export default function Page() {
   const [tab, setTab] = useState('FIXED');
   const [periods, setPeriods] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [periodEmployeeIds, setPeriodEmployeeIds] = useState([]);
+  const [employeePickerSearch, setEmployeePickerSearch] = useState('');
+  const [loadingPeriodEmployees, setLoadingPeriodEmployees] = useState(false);
   const [salaryPolicies, setSalaryPolicies] = useState([]);
   const [salaryRateVersions, setSalaryRateVersions] = useState([]);
   const [columns, setColumns] = useState([]);
@@ -105,8 +108,34 @@ export default function Page() {
       .sort((a, b) => String(b.month || b.start_date || b.created_at || '').localeCompare(String(a.month || a.start_date || a.created_at || '')));
   }, [periods, tab, statusFilter, search]);
 
-  const openCreate = () => { setEditingId(null); setForm(defaultForm(tab)); setShowForm(true); setSelected(null); setError(''); setMessage(''); };
-  const openEdit = period => { setEditingId(period.id); setForm({ type: period.type, name: period.name || '', month: period.month || monthNow(), start_date: period.start_date || `${period.month || monthNow()}-01`, end_date: period.end_date || '', description: period.description || '', status: period.status || 'DRAFT', salary_version_id: period.salary_version_id || '', salary_rate_version_id: period.salary_rate_version_id || '' }); setShowForm(true); setError(''); setMessage(''); };
+  const selectableEmployees = useMemo(() => {
+    const q = employeePickerSearch.trim().toLocaleLowerCase('vi');
+    return employees.filter(e => (!inactive(e) || periodEmployeeIds.includes(e.id)) && employeeCode(e))
+      .filter(e => !q || [employeeCode(e), employeeName(e), e.department, e.position, e.job_title].some(v => String(v || '').toLocaleLowerCase('vi').includes(q)))
+      .sort((a,b) => employeeCode(a).localeCompare(employeeCode(b),'vi'));
+  }, [employees, employeePickerSearch, periodEmployeeIds]);
+
+  const openCreate = () => {
+    setEditingId(null); setForm(defaultForm(tab)); setEmployeePickerSearch('');
+    setPeriodEmployeeIds(tab === 'FIXED' ? employees.filter(e => !inactive(e) && employeeCode(e)).map(e => e.id) : []);
+    setShowForm(true); setSelected(null); setError(''); setMessage('');
+  };
+  const openEdit = async period => {
+    setEditingId(period.id);
+    setForm({ type: period.type, name: period.name || '', month: period.month || monthNow(), start_date: period.start_date || `${period.month || monthNow()}-01`, end_date: period.end_date || '', description: period.description || '', status: period.status || 'DRAFT', salary_version_id: period.salary_version_id || '', salary_rate_version_id: period.salary_rate_version_id || '' });
+    setEmployeePickerSearch(''); setShowForm(true); setError(''); setMessage('');
+    if (period.type === 'FIXED') {
+      setLoadingPeriodEmployees(true);
+      try {
+        const { data, error: membershipError } = await supabase.from('payroll_period_employees').select('employee_id').eq('period_id', period.id);
+        if (membershipError) throw membershipError;
+        setPeriodEmployeeIds((data || []).map(x => x.employee_id));
+      } catch (e) {
+        setError(`Không tải được danh sách nhân sự của kỳ: ${e.message}`);
+        setPeriodEmployeeIds([]);
+      } finally { setLoadingPeriodEmployees(false); }
+    } else setPeriodEmployeeIds([]);
+  };
   const savePeriod = async event => {
     event.preventDefault(); if (!supabase || saving) return;
     if (!form.name.trim()) { setError('Vui lòng nhập tên kỳ.'); return; }
@@ -123,9 +152,22 @@ export default function Page() {
       const duplicate = periods.find(p => p.type === 'FIXED' && p.month === form.month && p.id !== editingId);
       if (duplicate) { setError(`Đã tồn tại kỳ lương cố định ${monthLabel(form.month)} (${duplicate.code}). Mỗi tháng chỉ có một kỳ.`); return; }
     }
+    if (editingId && form.type === 'FIXED') {
+      const existingPeriod = periods.find(p => p.id === editingId);
+      if (String(existingPeriod?.status || '').toUpperCase() === 'CLOSED') {
+        const { data: currentMembership, error: membershipReadError } = await supabase.from('payroll_period_employees').select('employee_id').eq('period_id', editingId);
+        if (membershipReadError) { setError(`Không kiểm tra được danh sách nhân sự hiện tại: ${membershipReadError.message}`); return; }
+        const currentIds = new Set((currentMembership || []).map(x => x.employee_id));
+        const requestedIds = new Set(periodEmployeeIds);
+        if (currentIds.size !== requestedIds.size || [...currentIds].some(id => !requestedIds.has(id))) {
+          setError('Kỳ lương đã đóng. Hãy mở lại kỳ trước khi thay đổi danh sách nhân sự.');
+          return;
+        }
+      }
+    }
     setSaving(true); setError(''); setMessage('');
     try {
-      const currentEmployees = form.type === 'FIXED' ? employees.filter(e => !inactive(e) && employeeCode(e)) : [];
+      const currentEmployees = form.type === 'FIXED' ? employees.filter(e => periodEmployeeIds.includes(e.id) && employeeCode(e)) : [];
       const monthForCode = form.month || form.start_date?.slice(0, 7) || monthNow();
       const sameMonthCount = periods.filter(p => p.type === form.type && String(p.month || p.start_date || '').startsWith(monthForCode)).length;
       const code = editingId ? periods.find(p => p.id === editingId)?.code : makeCode(form.type === 'FIXED' ? 'FIXED' : 'EVENT', monthForCode, sameMonthCount + 1);
@@ -137,15 +179,26 @@ export default function Page() {
       else result = await supabase.from(TABLE).insert(payload).select('*').single();
       if (result.error) throw result.error;
       const period = result.data;
-      if (!editingId && form.type === 'FIXED') {
-        // Snapshot employee membership at creation; do not copy prior attendance or payroll values.
-        if (currentEmployees.length) {
-          const snapshots = currentEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code: employeeCode(e), employee_name: employeeName(e), department: e.department || e['Phòng Ban'] || null, position: e.position || e.job_title || e['Chức Vụ'] || null }));
+      if (form.type === 'FIXED') {
+        // Chỉ cập nhật membership của kỳ; không chạm attendance/payroll snapshots hay Employee Master.
+        const { data: existingMembership, error: existingMembershipError } = await supabase
+          .from('payroll_period_employees').select('employee_id').eq('period_id', period.id);
+        if (existingMembershipError) throw new Error(`Không đọc được danh sách nhân sự hiện tại: ${existingMembershipError.message}`);
+        const existingIds = new Set((existingMembership || []).map(x => x.employee_id));
+        const desiredIds = new Set(currentEmployees.map(x => x.id));
+        const removeIds = [...existingIds].filter(id => !desiredIds.has(id));
+        const addEmployees = currentEmployees.filter(x => !existingIds.has(x.id));
+        if (removeIds.length) {
+          const { error: deleteMembershipError } = await supabase.from('payroll_period_employees').delete().eq('period_id', period.id).in('employee_id', removeIds);
+          if (deleteMembershipError) throw new Error(`Không thể bỏ nhân sự khỏi kỳ: ${deleteMembershipError.message}`);
+        }
+        if (addEmployees.length) {
+          const snapshots = addEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code: employeeCode(e), employee_name: employeeName(e), department: e.department || e['Phòng Ban'] || null, position: e.position || e.job_title || e['Chức Vụ'] || null }));
           const snapshotResult = await supabase.from('payroll_period_employees').insert(snapshots);
-          if (snapshotResult.error) throw new Error(`Đã tạo kỳ ${period.code} nhưng chưa chốt được danh sách nhân sự: ${snapshotResult.error.message}. Không tạo lại kỳ; hãy kiểm tra bảng payroll_period_employees.`);
+          if (snapshotResult.error) throw new Error(`Đã lưu thông tin kỳ nhưng chưa cập nhật đủ nhân sự: ${snapshotResult.error.message}`);
         }
         const countUpdate = await supabase.from(TABLE).update({ employee_count: currentEmployees.length }).eq('id', period.id);
-        if (countUpdate.error) throw new Error(`Đã tạo kỳ nhưng chưa cập nhật số lượng nhân sự: ${countUpdate.error.message}`);
+        if (countUpdate.error) throw new Error(`Không cập nhật được số lượng nhân sự: ${countUpdate.error.message}`);
       }
       if (!editingId && form.type === 'EVENT') {
         const seeded = DEFAULT_COLUMNS.map((c, i) => ({ period_id: period.id, key: c.key, label: c.label, data_type: c.data_type, is_required: c.required, display_order: i + 1, is_active: true }));
@@ -340,6 +393,17 @@ export default function Page() {
         <label className="pp-form-wide">Tên kỳ <span>*</span><input required maxLength={180} value={form.name} placeholder={tab === 'FIXED' ? 'VD: Kỳ lương tháng 09/2026' : 'VD: Kỳ thưởng thành tích 2026'} onChange={e => setForm(v => ({ ...v, name: e.target.value }))}/></label>
         <label>Ngày bắt đầu<input type="date" value={form.start_date || ''} onChange={e => setForm(v => ({ ...v, start_date: e.target.value }))}/></label><label>Ngày kết thúc<input type="date" min={form.start_date || undefined} value={form.end_date || ''} onChange={e => setForm(v => ({ ...v, end_date: e.target.value }))}/></label>
         <label>Trạng thái<select value={editingId ? form.status : 'DRAFT'} disabled={!editingId} onChange={e => setForm(v => ({ ...v, status: e.target.value }))}><option value="DRAFT">Bản nháp</option><option value="OPEN">Đang mở</option><option value="CLOSED">Đã đóng</option></select></label>
+        {form.type === 'FIXED' && <div className="pp-form-wide pp-employee-selector">
+          <div className="pp-employee-selector-head"><div><strong>Nhân sự được tính lương trong kỳ</strong><small>Đã chọn {periodEmployeeIds.length}/{employees.filter(e => !inactive(e) && employeeCode(e)).length} nhân sự đang hoạt động. Danh sách này độc lập với Employee Master.</small></div>
+            <div className="pp-employee-selector-actions"><button type="button" className="pp-button secondary" disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onClick={() => setPeriodEmployeeIds(employees.filter(e => !inactive(e) && employeeCode(e)).map(e => e.id))}>Chọn tất cả</button><button type="button" className="pp-button secondary" disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onClick={() => setPeriodEmployeeIds([])}>Bỏ chọn tất cả</button></div>
+          </div>
+          <div className="pp-employee-search"><Search size={15}/><input value={employeePickerSearch} onChange={e => setEmployeePickerSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên, vị trí..."/></div>
+          {loadingPeriodEmployees ? <div className="pp-employee-empty">Đang tải danh sách nhân sự của kỳ...</div> : <div className="pp-employee-list">
+            {selectableEmployees.map(e => <label key={e.id} className="pp-employee-option"><input type="checkbox" checked={periodEmployeeIds.includes(e.id)} disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onChange={ev => setPeriodEmployeeIds(old => ev.target.checked ? [...old,e.id] : old.filter(id => id !== e.id))}/><strong>{employeeCode(e)}</strong><span>{employeeName(e)}</span><small>{e.position || e.job_title || '—'}{e.department ? ` · ${e.department}` : ''}</small></label>)}
+            {selectableEmployees.length === 0 && <div className="pp-employee-empty">Không tìm thấy nhân sự phù hợp.</div>}
+          </div>}
+          {editingId && <small className="pp-employee-warning">Khi lưu, chỉ thay đổi danh sách nhân sự của kỳ này. Dữ liệu chấm công, kết quả tính lương và các kỳ khác không bị xóa hoặc thay đổi.</small>}
+        </div>}
         <label className="pp-form-wide">Mô tả / mục đích<textarea rows={2} maxLength={1000} value={form.description} placeholder="Thông tin bổ sung (không bắt buộc)" onChange={e => setForm(v => ({ ...v, description: e.target.value }))}/></label>
         <div className="pp-form-actions pp-form-wide"><button className="pp-button primary" type="submit" disabled={saving || !isSupabaseConfigured}><Save size={15}/>{saving ? 'Đang lưu…' : editingId ? 'Lưu thay đổi' : 'Tạo kỳ nháp'}</button><button type="button" className="pp-button secondary" onClick={() => setShowForm(false)}>Hủy</button></div>
       </form></section>}
