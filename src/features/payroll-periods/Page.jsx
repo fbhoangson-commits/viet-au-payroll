@@ -35,6 +35,7 @@ export default function Page() {
   const [periods, setPeriods] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [periodEmployeeIds, setPeriodEmployeeIds] = useState([]);
+  const [periodEmployeeExclusions, setPeriodEmployeeExclusions] = useState({});
   const [employeePickerSearch, setEmployeePickerSearch] = useState('');
   const [loadingPeriodEmployees, setLoadingPeriodEmployees] = useState(false);
   const [salaryPolicies, setSalaryPolicies] = useState([]);
@@ -117,7 +118,7 @@ export default function Page() {
 
   const openCreate = () => {
     setEditingId(null); setForm(defaultForm(tab)); setEmployeePickerSearch('');
-    setPeriodEmployeeIds(tab === 'FIXED' ? employees.filter(e => !inactive(e) && employeeCode(e)).map(e => e.id) : []);
+    setPeriodEmployeeIds(tab === 'FIXED' ? employees.filter(e => !inactive(e) && employeeCode(e)).map(e => e.id) : []); setPeriodEmployeeExclusions({});
     setShowForm(true); setSelected(null); setError(''); setMessage('');
   };
   const openEdit = async period => {
@@ -127,14 +128,31 @@ export default function Page() {
     if (period.type === 'FIXED') {
       setLoadingPeriodEmployees(true);
       try {
-        const { data, error: membershipError } = await supabase.from('payroll_period_employees').select('employee_id').eq('period_id', period.id);
+        const [{ data, error: membershipError }, { data: snapshotRows, error: snapshotError }] = await Promise.all([
+          supabase.from('payroll_period_employees').select('*').eq('period_id', period.id),
+          supabase.from('payroll_period_employee_snapshots').select('*').eq('period_id', period.id),
+        ]);
         if (membershipError) throw membershipError;
-        setPeriodEmployeeIds((data || []).map(x => x.employee_id));
+        if (snapshotError) throw snapshotError;
+        const memberRows = data || [];
+        setPeriodEmployeeIds(memberRows.map(x => x.employee_id));
+        setPeriodEmployeeExclusions(Object.fromEntries(memberRows.map(x => [x.employee_id, {
+          exclude_insurance: x.exclude_insurance === true,
+          exclude_tax: x.exclude_tax === true,
+          period_note: x.period_note || '',
+        }])));
+        // If membership table is empty in a legacy period, preserve the existing attendance snapshot membership.
+        if (!memberRows.length && snapshotRows?.length) {
+          setPeriodEmployeeIds(snapshotRows.map(x => x.employee_id));
+          setPeriodEmployeeExclusions(Object.fromEntries(snapshotRows.map(x => [x.employee_id, {
+            exclude_insurance: x.exclude_insurance === true, exclude_tax: x.exclude_tax === true, period_note: x.period_note || ''
+          }])));
+        }
       } catch (e) {
         setError(`Không tải được danh sách nhân sự của kỳ: ${e.message}`);
         setPeriodEmployeeIds([]);
       } finally { setLoadingPeriodEmployees(false); }
-    } else setPeriodEmployeeIds([]);
+    } else { setPeriodEmployeeIds([]); setPeriodEmployeeExclusions({}); }
   };
   const savePeriod = async event => {
     event.preventDefault(); if (!supabase || saving) return;
@@ -181,21 +199,42 @@ export default function Page() {
       const period = result.data;
       if (form.type === 'FIXED') {
         // Chỉ cập nhật membership của kỳ; không chạm attendance/payroll snapshots hay Employee Master.
-        const { data: existingMembership, error: existingMembershipError } = await supabase
-          .from('payroll_period_employees').select('employee_id').eq('period_id', period.id);
+        const [{ data: existingMembership, error: existingMembershipError }, { data: existingSnapshots, error: existingSnapshotsError }] = await Promise.all([
+          supabase.from('payroll_period_employees').select('*').eq('period_id', period.id),
+          supabase.from('payroll_period_employee_snapshots').select('*').eq('period_id', period.id),
+        ]);
         if (existingMembershipError) throw new Error(`Không đọc được danh sách nhân sự hiện tại: ${existingMembershipError.message}`);
+        if (existingSnapshotsError) throw new Error(`Không đọc được snapshot nhân sự hiện tại: ${existingSnapshotsError.message}`);
         const existingIds = new Set((existingMembership || []).map(x => x.employee_id));
+        const existingSnapshotIds = new Set((existingSnapshots || []).map(x => x.employee_id));
         const desiredIds = new Set(currentEmployees.map(x => x.id));
-        const removeIds = [...existingIds].filter(id => !desiredIds.has(id));
+        const removeIds = [...new Set([...existingIds, ...existingSnapshotIds])].filter(id => !desiredIds.has(id));
         const addEmployees = currentEmployees.filter(x => !existingIds.has(x.id));
+        const addSnapshotEmployees = currentEmployees.filter(x => !existingSnapshotIds.has(x.id));
         if (removeIds.length) {
           const { error: deleteMembershipError } = await supabase.from('payroll_period_employees').delete().eq('period_id', period.id).in('employee_id', removeIds);
-          if (deleteMembershipError) throw new Error(`Không thể bỏ nhân sự khỏi kỳ: ${deleteMembershipError.message}`);
+          if (deleteMembershipError) throw new Error(`Không thể bỏ nhân sự khỏi danh sách kỳ: ${deleteMembershipError.message}`);
+          const { error: deleteSnapshotError } = await supabase.from('payroll_period_employee_snapshots').delete().eq('period_id', period.id).in('employee_id', removeIds);
+          if (deleteSnapshotError) throw new Error(`Đã cập nhật danh sách kỳ nhưng không đồng bộ được snapshot chấm công: ${deleteSnapshotError.message}`);
         }
         if (addEmployees.length) {
-          const snapshots = addEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code: employeeCode(e), employee_name: employeeName(e), department: e.department || e['Phòng Ban'] || null, position: e.position || e.job_title || e['Chức Vụ'] || null }));
-          const snapshotResult = await supabase.from('payroll_period_employees').insert(snapshots);
-          if (snapshotResult.error) throw new Error(`Đã lưu thông tin kỳ nhưng chưa cập nhật đủ nhân sự: ${snapshotResult.error.message}`);
+          const rows = addEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code: employeeCode(e), employee_name: employeeName(e), department: e.department || e['Phòng Ban'] || null, position: e.position || e.job_title || e['Chức Vụ'] || null,
+            exclude_insurance: periodEmployeeExclusions[e.id]?.exclude_insurance === true, exclude_tax: periodEmployeeExclusions[e.id]?.exclude_tax === true, period_note: periodEmployeeExclusions[e.id]?.period_note || null }));
+          const result = await supabase.from('payroll_period_employees').insert(rows);
+          if (result.error) throw new Error(`Không thể thêm nhân sự vào kỳ: ${result.error.message}`);
+        }
+        if (addSnapshotEmployees.length) {
+          const rows = addSnapshotEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code_snapshot: employeeCode(e), employee_name_snapshot: employeeName(e), department_snapshot: e.department || e['Phòng Ban'] || null,
+            standard_type: null, standard_days: null, exclude_insurance: periodEmployeeExclusions[e.id]?.exclude_insurance === true, exclude_tax: periodEmployeeExclusions[e.id]?.exclude_tax === true, period_note: periodEmployeeExclusions[e.id]?.period_note || null }));
+          const result = await supabase.from('payroll_period_employee_snapshots').insert(rows);
+          if (result.error) throw new Error(`Đã cập nhật danh sách kỳ nhưng không đồng bộ được snapshot chấm công: ${result.error.message}`);
+        }
+        for (const e of currentEmployees.filter(x => existingIds.has(x.id))) {
+          const flags = { exclude_insurance: periodEmployeeExclusions[e.id]?.exclude_insurance === true, exclude_tax: periodEmployeeExclusions[e.id]?.exclude_tax === true, period_note: periodEmployeeExclusions[e.id]?.period_note || null };
+          const a = await supabase.from('payroll_period_employees').update(flags).eq('period_id', period.id).eq('employee_id', e.id);
+          if (a.error) throw new Error(`Không cập nhật được cờ BHXH/thuế của ${employeeCode(e)}: ${a.error.message}`);
+          const b = await supabase.from('payroll_period_employee_snapshots').update(flags).eq('period_id', period.id).eq('employee_id', e.id);
+          if (b.error) throw new Error(`Không đồng bộ được cờ BHXH/thuế snapshot của ${employeeCode(e)}: ${b.error.message}`);
         }
         const countUpdate = await supabase.from(TABLE).update({ employee_count: currentEmployees.length }).eq('id', period.id);
         if (countUpdate.error) throw new Error(`Không cập nhật được số lượng nhân sự: ${countUpdate.error.message}`);
@@ -394,15 +433,20 @@ export default function Page() {
         <label>Ngày bắt đầu<input type="date" value={form.start_date || ''} onChange={e => setForm(v => ({ ...v, start_date: e.target.value }))}/></label><label>Ngày kết thúc<input type="date" min={form.start_date || undefined} value={form.end_date || ''} onChange={e => setForm(v => ({ ...v, end_date: e.target.value }))}/></label>
         <label>Trạng thái<select value={editingId ? form.status : 'DRAFT'} disabled={!editingId} onChange={e => setForm(v => ({ ...v, status: e.target.value }))}><option value="DRAFT">Bản nháp</option><option value="OPEN">Đang mở</option><option value="CLOSED">Đã đóng</option></select></label>
         {form.type === 'FIXED' && <div className="pp-form-wide pp-employee-selector">
-          <div className="pp-employee-selector-head"><div><strong>Nhân sự được tính lương trong kỳ</strong><small>Đã chọn {periodEmployeeIds.length}/{employees.filter(e => !inactive(e) && employeeCode(e)).length} nhân sự đang hoạt động. Danh sách này độc lập với Employee Master.</small></div>
+          <div className="pp-employee-selector-head"><div><strong>Nhân sự được tính lương trong kỳ</strong><small>Đã chọn {periodEmployeeIds.length}/{employees.filter(e => (!inactive(e) || periodEmployeeIds.includes(e.id)) && employeeCode(e)).length} nhân sự. Đánh dấu nghỉ/tạm nghỉ để loại khỏi BHXH và thuế TNCN của kỳ.</small></div>
             <div className="pp-employee-selector-actions"><button type="button" className="pp-button secondary" disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onClick={() => setPeriodEmployeeIds(employees.filter(e => !inactive(e) && employeeCode(e)).map(e => e.id))}>Chọn tất cả</button><button type="button" className="pp-button secondary" disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onClick={() => setPeriodEmployeeIds([])}>Bỏ chọn tất cả</button></div>
           </div>
           <div className="pp-employee-search"><Search size={15}/><input value={employeePickerSearch} onChange={e => setEmployeePickerSearch(e.target.value)} placeholder="Tìm mã nhân viên, họ tên, vị trí..."/></div>
           {loadingPeriodEmployees ? <div className="pp-employee-empty">Đang tải danh sách nhân sự của kỳ...</div> : <div className="pp-employee-list">
-            {selectableEmployees.map(e => <label key={e.id} className="pp-employee-option"><input type="checkbox" checked={periodEmployeeIds.includes(e.id)} disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onChange={ev => setPeriodEmployeeIds(old => ev.target.checked ? [...old,e.id] : old.filter(id => id !== e.id))}/><strong>{employeeCode(e)}</strong><span>{employeeName(e)}</span><small>{e.position || e.job_title || '—'}{e.department ? ` · ${e.department}` : ''}</small></label>)}
+            <div className="pp-employee-row pp-employee-row-head"><span>Chọn</span><span>Mã NV</span><span>Họ và tên</span><span>Vị trí / Bộ phận</span><span>Loại trừ BHXH & Thuế</span></div>
+            {selectableEmployees.map(e => <div key={e.id} className={`pp-employee-row ${periodEmployeeIds.includes(e.id) ? '' : 'is-unselected'}`}>
+              <label className="pp-employee-check"><input type="checkbox" checked={periodEmployeeIds.includes(e.id)} disabled={Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onChange={ev => setPeriodEmployeeIds(old => ev.target.checked ? [...old,e.id] : old.filter(id => id !== e.id))}/></label>
+              <strong>{employeeCode(e)}</strong><span>{employeeName(e)}</span><small>{e.position || e.job_title || '—'}{e.department ? ` · ${e.department}` : ''}</small>
+              <label className="pp-employee-exclusion"><input type="checkbox" checked={periodEmployeeExclusions[e.id]?.exclude_insurance === true && periodEmployeeExclusions[e.id]?.exclude_tax === true} disabled={!periodEmployeeIds.includes(e.id) || Boolean(editingId && String(periods.find(p => p.id === editingId)?.status || '').toUpperCase() === 'CLOSED')} onChange={ev => setPeriodEmployeeExclusions(old => ({...old,[e.id]:{...old[e.id],exclude_insurance:ev.target.checked,exclude_tax:ev.target.checked}}))}/><span>Nghỉ / tạm nghỉ chế độ</span></label>
+            </div>)}
             {selectableEmployees.length === 0 && <div className="pp-employee-empty">Không tìm thấy nhân sự phù hợp.</div>}
           </div>}
-          {editingId && <small className="pp-employee-warning">Khi lưu, chỉ thay đổi danh sách nhân sự của kỳ này. Dữ liệu chấm công, kết quả tính lương và các kỳ khác không bị xóa hoặc thay đổi.</small>}
+          {editingId && <small className="pp-employee-warning">Khi lưu, chỉ thay đổi danh sách nhân sự của kỳ này. Dữ liệu chấm công và lịch sử tính lương được giữ nguyên; danh sách này được đồng bộ sang Chấm Công ngày, Chấm Công Tiết Dạy, BHXH và Thuế.</small>}
         </div>}
         <label className="pp-form-wide">Mô tả / mục đích<textarea rows={2} maxLength={1000} value={form.description} placeholder="Thông tin bổ sung (không bắt buộc)" onChange={e => setForm(v => ({ ...v, description: e.target.value }))}/></label>
         <div className="pp-form-actions pp-form-wide"><button className="pp-button primary" type="submit" disabled={saving || !isSupabaseConfigured}><Save size={15}/>{saving ? 'Đang lưu…' : editingId ? 'Lưu thay đổi' : 'Tạo kỳ nháp'}</button><button type="button" className="pp-button secondary" onClick={() => setShowForm(false)}>Hủy</button></div>

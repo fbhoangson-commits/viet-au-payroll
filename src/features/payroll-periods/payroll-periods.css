@@ -19,3 +19,17 @@
 .pp-employee-empty{padding:16px;text-align:center;color:#8799aa;font-size:11px}
 .pp-employee-warning{color:#a36b24}
 @media(max-width:760px){.pp-employee-list{grid-template-columns:1fr}.pp-employee-option{grid-template-columns:16px 70px minmax(0,1fr)}}
+
+/* Compact selectable employee rows; replace difficult-to-scan employee cards */
+.pp-employee-list{display:flex;flex-direction:column;gap:0;max-height:340px;overflow:auto;border:1px solid #e1eaf2;border-radius:8px;background:#fff}
+.pp-employee-row{display:grid;grid-template-columns:48px 90px minmax(180px,1.3fr) minmax(150px,1fr) minmax(190px,.9fr);align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #edf1f5;min-height:38px;font-size:11px}
+.pp-employee-row:last-child{border-bottom:0}
+.pp-employee-row-head{position:sticky;top:0;z-index:2;background:#f4f8fb;color:#607b91;font-weight:700;font-size:10px}
+.pp-employee-row strong{color:#17608d;font-size:11px}
+.pp-employee-row>span{color:#294a66;min-width:0}
+.pp-employee-row>small{color:#8295a7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-employee-check{display:flex;justify-content:center}
+.pp-employee-exclusion{display:flex;align-items:center;gap:6px;color:#a36b24;font-size:10px;white-space:nowrap}
+.pp-employee-exclusion input,.pp-employee-check input{margin:0}
+.pp-employee-row.is-unselected{opacity:.55;background:#fafbfc}
+@media(max-width:900px){.pp-employee-row{grid-template-columns:32px 70px minmax(130px,1fr) minmax(120px,1fr)}.pp-employee-row-head span:last-child{display:none}.pp-employee-exclusion{grid-column:3 / -1;padding-left:4px}}

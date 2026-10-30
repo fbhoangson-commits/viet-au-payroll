@@ -301,8 +301,10 @@ export default function PayrollCalculationPage({ page }) {
         const hasMasterProfile=Boolean(master.id);
         const insurance=insuranceByEmployee.get(id)||insuranceByCode.get(code)||{};
         const insuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
-        const insuranceEmployee=num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? ((tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*insuranceRate/100 : 0));
-        const employerInsurance=num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
+        const excludeInsurance=s.exclude_insurance===true;
+        const excludeTax=s.exclude_tax===true;
+        const insuranceEmployee=excludeInsurance?0:num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? ((tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*insuranceRate/100 : 0));
+        const employerInsurance=excludeInsurance?0:num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
         const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         const classification=classificationOf(master,s,tax);
@@ -317,11 +319,11 @@ export default function PayrollCalculationPage({ page }) {
         // Match insurance-tax-data/Page.jsx: use the current period's computed income, relief, support and employee insurance.
         // A manual override is the only persisted taxable-income value that supersedes the source calculation.
         const taxInsuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
-        const taxInsuranceAmount=(tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*taxInsuranceRate/100 : 0;
+        const taxInsuranceAmount=!excludeInsurance&&(tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*taxInsuranceRate/100 : 0;
         const calculatedTaxable=isPermanent ? Math.max(0,gross-employeeSupport-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-taxInsuranceAmount) : Math.max(0,fixed+teaching+additions);
-        const taxable=Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:calculatedTaxable));
+        const taxable=excludeTax?0:Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:calculatedTaxable));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
-        const taxAmount=estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
+        const taxAmount=excludeTax?0:estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
@@ -329,10 +331,11 @@ export default function PayrollCalculationPage({ page }) {
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
         if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
         if(!classification) status.push('Chưa cập nhật phân loại');
+        if(excludeInsurance||excludeTax) status.push('Nghỉ/tạm nghỉ chế độ – đã loại BHXH/thuế theo thiết lập kỳ');
         const fixedComponentCount=rateCount;
         const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
         const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
-        return {id,code,name:nameOf(s)||nameOf(master),classification,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,employeeSupport,supportTax,supportCount:employeeSupportData.count,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
+        return {id,code,name:nameOf(s)||nameOf(master),classification,excludeInsurance,excludeTax,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,employeeSupport,supportTax,supportCount:employeeSupportData.count,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
       }).sort((a,b)=>a.code.localeCompare(b.code,'vi',{numeric:true}));
       setRows(output);setWarnings(notes);setDataLoaded(true);
     } catch(e) {setError(errorText(e));setRows([]);setWarnings(notes);setDataLoaded(false);}
