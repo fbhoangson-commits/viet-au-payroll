@@ -50,7 +50,7 @@ export default function Page() {
         supabase.from('salary_rate_version_values').select('*'),
         supabase.from('salary_rate_groups').select('*'),
       ]);
-      const [employeeRows, p, n, f, v, g, rv, rvv] = results;
+      const [employeeRows, p, n, f, v, rv, rvv, g] = results;
       if (p.error) throw p.error; if (n.error) throw n.error; if (f.error) throw f.error; if (v.error) throw v.error; if (g.error) throw g.error; if (rv.error) throw rv.error; if (rvv.error) throw rvv.error;
       setEmployees((employeeRows || []).map(expandEmployee)); setPolicies(p.data || []); setNorms(n.data || []); setFields(f.data || []); setRateValues([...(v.data || []),...(rvv.data || [])]); setGroups(g.data || []); setRateVersions(rv.data||[]);
       setPolicyId(old => old && (p.data || []).some(x => x.id === old) ? old : ((p.data || []).find(x => String(x.status).toUpperCase() === 'ACTIVE') || (p.data || [])[0])?.id || '');
