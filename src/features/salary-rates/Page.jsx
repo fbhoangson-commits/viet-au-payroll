@@ -152,12 +152,48 @@ function SalaryRatesModule({supabase,employees=[],policies=[],notify=()=>{}}){
    setRateVersions(prev=>[...prev,created]);setRateVersionId(created.id);await load();notify(`Đã tạo ${created.name} và sao chép toàn bộ định mức từ ${source.name}.`);
   }catch(e){notify(`Không tạo được phiên bản định mức: ${e.message||e.code}`);}
  }
- function openRateReport(){const cols=fields.filter(f=>f.is_active!==false).sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0));setReportColumns(cols.map(c=>c.id));setShowReport(true);}
+ function openRateReport(){const cols=fields.filter(f=>f.is_active!==false).sort((a,b)=>{const ga=groups.findIndex(g=>g.id===a.group_id),gb=groups.findIndex(g=>g.id===b.group_id);return ga-gb||Number(a.display_order||0)-Number(b.display_order||0);});setReportColumns(cols.map(c=>c.id));setShowReport(true);}
  function exportRateReport(){
-  const cols=fields.filter(f=>reportColumns.includes(f.id)).sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0));const byEmployee=new Map(values.filter(v=>v.rate_version_id===rateVersionId).map(v=>[`${v.employee_id}:${v.group_id}`,v.values||{}]));
+  const orderedGroups=[...groups].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0));
+  const selectedGroups=orderedGroups.map(g=>({...g,columns:fields.filter(f=>f.group_id===g.id&&reportColumns.includes(f.id)&&f.is_active!==false).sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0))})).filter(g=>g.columns.length);
+  const cols=selectedGroups.flatMap(g=>g.columns);
+  const byEmployee=new Map(values.filter(v=>v.rate_version_id===rateVersionId).map(v=>[`${v.employee_id}:${v.group_id}`,v.values||{}]));
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const rows=filtered.map(e=>{const cells=[e.id,e.name];for(const c of cols){const v=byEmployee.get(`${e.supabaseId}:${c.group_id}`)||{};cells.push(v[c.id]??v[c.code]??'');}return `<tr>${cells.map(x=>`<td>${esc(x)}</td>`).join('')}</tr>`;}).join('');
-  const headers=['Mã nhân viên','Họ và tên',...cols.map(c=>c.name)];const html=`<!doctype html><html><head><meta charset="utf-8"><title>Báo cáo định mức</title><style>@page{size:A4 landscape;margin:10mm}body{font:10px Arial;color:#111}h2{text-align:center;margin:0 0 5px}p{margin:0 0 10px;text-align:center}table{width:100%;border-collapse:collapse}th,td{border:1px solid #777;padding:4px;text-align:left}th{background:#eee}thead{display:table-header-group}tr{break-inside:avoid}</style></head><body><h2>BÁO CÁO ĐỊNH MỨC LƯƠNG</h2><p>${esc(rateVersions.find(v=>v.id===rateVersionId)?.name||'')} · ${esc(policyId)} · ${filtered.length} nhân sự</p><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
+  const fmt=value=>{
+   if(value===null||value===undefined||value==='')return '—';
+   if(typeof value==='number'||(typeof value==='string'&&/^[+-]?(?:\\d+|\\d{1,3}(?:[., ]\\d{3})+)$/.test(value.trim()))){
+    const n=typeof value==='number'?value:Number(String(value).replace(/[., ]/g,''));
+    if(!Number.isFinite(n)||n===0)return '—';
+    return Math.round(n).toLocaleString('vi-VN',{maximumFractionDigits:0});
+   }
+   return String(value);
+  };
+  const groupHeader=`<tr><th rowspan="2">Mã nhân viên</th><th rowspan="2">Họ và tên</th>${selectedGroups.map(g=>`<th colspan="${g.columns.length}" class="group-head">${esc(g.name)}</th>`).join('')}</tr>`;
+  const columnHeader=`<tr>${cols.map(c=>`<th class="column-head">${esc(c.name)}</th>`).join('')}</tr>`;
+  const rows=filtered.map(e=>{
+   const cells=[`<td class="employee-code">${esc(e.id)}</td>`,`<td class="employee-name">${esc(e.name)}</td>`];
+   for(const g of selectedGroups){const vals=byEmployee.get(`${e.supabaseId}:${g.id}`)||{};for(const c of g.columns)cells.push(`<td class="number">${esc(fmt(vals[c.id]??vals[c.code]))}</td>`);}
+   return `<tr>${cells.join('')}</tr>`;
+  }).join('');
+  const policy=policies.find(p=>p.id===policyId);
+  const version=rateVersions.find(v=>v.id===rateVersionId);
+  const meta=[policy?.code,policy?.name,version?.code,version?.name,`${filtered.length} nhân sự`].filter(Boolean).map(esc).join(' · ');
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Báo cáo định mức</title><style>
+   @page{size:A4 landscape;margin:9mm}
+   *{box-sizing:border-box}body{font:9px Arial,sans-serif;color:#111;margin:0}
+   h2{text-align:center;font-size:15px;margin:0 0 4px;font-weight:700}
+   .meta{text-align:center;font-size:9px;margin:0 0 9px;color:#333}
+   table{width:100%;border-collapse:collapse;table-layout:auto}
+   th,td{border:1px solid #777;padding:4px 5px;vertical-align:middle}
+   thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+   th{background:#e9edf2;font-weight:700;text-align:center}
+   th.group-head{background:#d7e1ec;font-size:9px;text-transform:uppercase}
+   th.column-head{background:#eef1f5;font-size:8px}
+   td.employee-code{white-space:nowrap;font-weight:600}
+   td.employee-name{min-width:115px}
+   td.number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body><h2>BÁO CÁO ĐỊNH MỨC LƯƠNG</h2><p class="meta">${meta}</p><table><thead>${groupHeader}${columnHeader}</thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
   const w=window.open('','_blank');if(!w)return notify('Trình duyệt đang chặn cửa sổ in. Hãy cho phép pop-up để xuất PDF.');w.document.write(html);w.document.close();setShowReport(false);
  }
  return <section className="panel salary-rates-module"><div className="section-intro"><div><h3>Định mức lương</h3><p>Danh sách nhân viên luôn là nền tảng. Chọn nhóm để hiển thị các cột thành phần tương ứng.</p></div><div className="salary-rate-actions"><button className="btn btn-secondary" onClick={downloadTemplate}><FileSpreadsheet size={14}/> Tải template</button><label className="btn btn-secondary salary-rate-file-button"><Upload size={14}/> Import<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={e=>{importCsv(e.target.files?.[0]);e.target.value='';}}/></label><button className="btn btn-secondary" onClick={exportCurrent}><Download size={14}/> Export</button><button className="btn btn-secondary" onClick={()=>{setVersionName("");setShowVersionForm(true)}}>＋ Phiên bản mới</button><button className="btn btn-secondary" onClick={openRateReport}>Báo cáo PDF</button><button className="btn btn-secondary" onClick={load}><RefreshCw size={14}/> Làm mới</button><button className="btn btn-secondary" disabled={versionLocked} title={versionLocked?"Phiên bản đã khóa; hãy tạo phiên bản mới":"Cấu hình nhóm & cột"} onClick={()=>setConfig(v=>!v)}><Settings2 size={14}/> Cấu hình nhóm & cột</button></div></div>
