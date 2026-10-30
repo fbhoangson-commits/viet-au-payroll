@@ -38,6 +38,7 @@ export default function Page() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showTaskManager, setShowTaskManager] = useState(false);
 
   const loadTasks = useCallback(async () => {
     if (!supabase) { setError('Supabase chưa được cấu hình. Không thể tải công việc.'); setLoading(false); return; }
@@ -127,38 +128,52 @@ export default function Page() {
     else { setTasks(old => old.filter(t => t.id !== task.id)); setNotice('Đã xóa công việc.'); }
   };
 
+  const previewTasks = tasks.filter(task => task.status !== 'completed').slice(0, 3);
+
   return <section className="feature-page dashboard-page">
-    <div className="feature-heading"><div className="feature-heading-icon"><ClipboardList size={21}/></div><div><div className="eyebrow">WORKSPACE · PAYROLL</div><h2>Tổng quan</h2><p>Không gian làm việc cá nhân và theo dõi các công việc cần thực hiện.</p></div></div>
-
-    <div className="dashboard-status-card"><div className="dashboard-status-icon"><ShieldCheck size={22}/></div><div><strong>Không gian làm việc VIỆT ÂU PAYROLL</strong><p>Các công việc được lưu theo tài khoản đăng nhập và đồng bộ qua Supabase.</p></div><button className="dashboard-refresh" onClick={loadTasks} disabled={loading}><RefreshCw size={14} className={loading ? 'dashboard-spin' : ''}/> Làm mới</button></div>
-
-    <section className="todo-card">
-      <div className="todo-header"><div className="todo-title-wrap"><div className="todo-icon"><ListTodo size={20}/></div><div><h3>CÔNG VIỆC CỦA TÔI</h3><p>Ghi nhớ, theo dõi và quản lý những công việc cần thực hiện.</p></div></div><button className="todo-primary" onClick={openCreate}><Plus size={16}/> Thêm công việc</button></div>
-
-      <div className="todo-stats">
-        <button className={`todo-stat ${filter === 'all' ? 'selected' : ''}`} onClick={() => setFilter('all')}><span>Tổng công việc</span><strong>{counts.all}</strong></button>
-        <button className={`todo-stat todo-stat-open ${filter === 'open' ? 'selected' : ''}`} onClick={() => setFilter('open')}><span>Chưa hoàn thành</span><strong>{counts.open}</strong></button>
-        <button className={`todo-stat todo-stat-done ${filter === 'done' ? 'selected' : ''}`} onClick={() => setFilter('done')}><span>Đã hoàn thành</span><strong>{counts.done}</strong></button>
-        <button className={`todo-stat todo-stat-overdue ${filter === 'overdue' ? 'selected' : ''}`} onClick={() => setFilter('overdue')}><span>Quá hạn</span><strong>{counts.overdue}</strong></button>
+    <div className="dashboard-top-row">
+      <div className="feature-heading dashboard-overview-heading">
+        <div className="feature-heading-icon"><ClipboardList size={21}/></div>
+        <div><div className="eyebrow">KHÔNG GIAN NGHIỆP VỤ</div><h2>Tổng quan</h2><p>Tổng hợp tình hình vận hành và các chỉ số theo kỳ lương.</p></div>
       </div>
 
-      <div className="todo-toolbar"><div className="todo-filters">{FILTERS.map(item => <button key={item.value} className={filter === item.value ? 'active' : ''} onClick={() => setFilter(item.value)}>{item.label}{item.value === 'overdue' && counts.overdue > 0 ? <b>{counts.overdue}</b> : null}</button>)}</div><label className="todo-sort">Sắp xếp<select value={sort} onChange={e => setSort(e.target.value)}><option value="priority">Mức độ ưu tiên</option><option value="due_date">Ngày hết hạn</option><option value="created_at">Ngày tạo mới nhất</option></select></label></div>
+      <aside className="todo-widget">
+        <div className="todo-widget-header">
+          <div className="todo-widget-heading"><div className="todo-widget-icon"><ListTodo size={16}/></div><div><h3>GHI CHÚ CỦA TÔI</h3><p>{counts.open} việc cần thực hiện{counts.overdue ? ` · ${counts.overdue} quá hạn` : ''}</p></div></div>
+          <button className="todo-widget-add" onClick={openCreate} title="Thêm ghi chú" aria-label="Thêm ghi chú"><Plus size={16}/></button>
+        </div>
+        {error && <div className="todo-widget-error"><AlertCircle size={13}/><span>{error}</span><button onClick={loadTasks} title="Thử tải lại"><RefreshCw size={12}/></button></div>}
+        {notice && <div className="todo-widget-notice">{notice}</div>}
+        {loading ? <div className="todo-widget-empty"><Loader2 size={14} className="dashboard-spin"/> Đang tải ghi chú…</div>
+          : previewTasks.length === 0 ? <div className="todo-widget-empty">{tasks.length ? 'Không còn việc nào cần thực hiện.' : 'Chưa có ghi chú. Thêm việc cần nhớ tại đây.'}</div>
+          : <div className="todo-widget-list">{previewTasks.map(task => <div className={`todo-widget-item ${isOverdue(task) ? 'is-overdue' : ''}`} key={task.id}>
+            <button className="todo-widget-check" onClick={() => toggleTask(task)} title="Đánh dấu hoàn thành"><Circle size={15}/></button>
+            <button className="todo-widget-task" onClick={() => openEdit(task)} title="Mở ghi chú"><strong>{task.title}</strong><span>{task.due_date ? `Hạn ${formatDate(task.due_date)}` : priorityLabel(task.priority)}{isOverdue(task) ? ' · Quá hạn' : ''}</span></button>
+            <button className="todo-widget-edit" onClick={() => openEdit(task)} title="Chỉnh sửa"><Edit3 size={13}/></button>
+          </div>)}</div>}
+        <div className="todo-widget-footer"><button onClick={() => { setFilter('open'); setShowTaskManager(v => !v); }}>{showTaskManager ? 'Thu gọn' : 'Xem tất cả ghi chú'}</button><span>{counts.done} hoàn thành</span></div>
+        {showTaskManager && <div className="todo-manager">
+          <div className="todo-manager-summary"><span>{counts.all} tổng</span><span>{counts.open} đang làm</span><span>{counts.overdue} quá hạn</span></div>
+          <div className="todo-manager-toolbar"><div className="todo-manager-filters">{FILTERS.map(item => <button key={item.value} className={filter === item.value ? 'active' : ''} onClick={() => setFilter(item.value)}>{item.label}</button>)}</div><select value={sort} onChange={e => setSort(e.target.value)} aria-label="Sắp xếp ghi chú"><option value="priority">Ưu tiên</option><option value="due_date">Ngày hết hạn</option><option value="created_at">Mới nhất</option></select></div>
+          <div className="todo-manager-list">{visibleTasks.length ? visibleTasks.map(task => <div className={`todo-manager-item ${task.status === 'completed' ? 'is-completed' : ''}`} key={task.id}>
+            <button onClick={() => toggleTask(task)} title={task.status === 'completed' ? 'Khôi phục' : 'Hoàn thành'}>{task.status === 'completed' ? <CheckCircle2 size={15}/> : <Circle size={15}/>}</button>
+            <div><strong>{task.title}</strong><span>{task.due_date ? `Hạn ${formatDate(task.due_date)}` : priorityLabel(task.priority)}{isOverdue(task) ? ' · Quá hạn' : ''}</span></div>
+            <button onClick={() => openEdit(task)} title="Sửa"><Edit3 size={13}/></button><button onClick={() => deleteTask(task)} title="Xóa"><Trash2 size={13}/></button>
+          </div>) : <p className="todo-manager-empty">Không có ghi chú phù hợp.</p>}</div>
+          {counts.done > 0 && <button className="todo-manager-completed" onClick={() => setShowCompleted(v => !v)}>{showCompleted ? 'Ẩn' : 'Hiện'} việc đã hoàn thành ({counts.done})</button>}
+          {showCompleted && <div className="todo-manager-completed-list">{tasks.filter(t => t.status === 'completed').map(task => <div key={task.id}><span>{task.title}</span><button onClick={() => toggleTask(task)} title="Khôi phục"><RefreshCw size={12}/></button></div>)}</div>}
+        </div>}
+      </aside>
+    </div>
 
-      {error && <div className="todo-alert todo-alert-error"><AlertCircle size={16}/><span>{error}</span></div>}
-      {notice && <div className="todo-alert todo-alert-success"><CheckCircle2 size={16}/><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Đóng thông báo"><X size={14}/></button></div>}
+    <div className="empty-workspace dashboard-empty-workspace">
+      <div className="empty-illustration"><ShieldCheck size={32}/></div>
+      <span className="status-pill">Chưa triển khai</span>
+      <h3>Sẵn sàng xây dựng module này</h3>
+      <p>Trang đang ở trạng thái khung trắng. Chưa tải dữ liệu, chưa chạy import và chưa thực hiện thay đổi trên cơ sở dữ liệu.</p>
+      <div className="empty-checklist"><span><i/>Giao diện riêng cho tính năng</span><span><i/>Xử lý nghiệp vụ độc lập</span><span><i/>Dịch vụ dữ liệu tách biệt</span></div>
+    </div>
 
-      {loading ? <div className="todo-state"><Loader2 size={22} className="dashboard-spin"/>Đang tải công việc…</div>
-        : visibleTasks.length === 0 ? <div className="todo-empty"><div><CheckCircle2 size={25}/></div><strong>{tasks.length === 0 ? 'Bạn chưa có công việc nào.' : 'Không có công việc phù hợp.'}</strong><p>{tasks.length === 0 ? 'Hãy thêm công việc đầu tiên để bắt đầu quản lý danh sách của mình.' : 'Thử chọn bộ lọc khác hoặc thêm công việc mới.'}</p>{tasks.length === 0 && <button className="todo-primary" onClick={openCreate}><Plus size={15}/> Thêm công việc đầu tiên</button>}</div>
-        : <div className="todo-list">{visibleTasks.map(task => <article className={`todo-item ${task.status === 'completed' ? 'is-completed' : ''} ${isOverdue(task) ? 'is-overdue' : ''}`} key={task.id}>
-          <button className={`todo-check ${task.status === 'completed' ? 'checked' : ''}`} onClick={() => toggleTask(task)} aria-label={task.status === 'completed' ? 'Đánh dấu chưa hoàn thành' : 'Đánh dấu hoàn thành'}>{task.status === 'completed' ? <Check size={15}/> : <Circle size={19}/>}</button>
-          <div className="todo-item-main"><div className="todo-item-title-row"><strong>{task.title}</strong><span className={`todo-priority priority-${task.priority || 'normal'}`}>{priorityLabel(task.priority)}</span>{isOverdue(task) && <span className="todo-overdue-label"><AlertCircle size={12}/> Quá hạn</span>}</div>{task.description && <p className="todo-description">{task.description}</p>}<div className="todo-meta">{task.due_date && <span className={isOverdue(task) ? 'overdue-date' : ''}><CalendarDays size={13}/> Hạn: {formatDate(task.due_date)}</span>}<span>{task.status === 'completed' ? <><CheckCircle2 size={13}/> Đã hoàn thành</> : <><Clock3 size={13}/> Chưa hoàn thành</>}</span></div></div>
-          <div className="todo-actions"><button onClick={() => openEdit(task)} aria-label="Sửa công việc" title="Sửa"><Edit3 size={15}/></button><button className="delete" onClick={() => deleteTask(task)} aria-label="Xóa công việc" title="Xóa"><Trash2 size={15}/></button></div>
-        </article>)}</div>}
-
-      {counts.done > 0 && filter !== 'done' && <button className="todo-completed-toggle" onClick={() => setShowCompleted(v => !v)}>{showCompleted ? 'Ẩn' : 'Hiện'} danh sách đã hoàn thành ({counts.done})</button>}
-      {showCompleted && filter !== 'done' && <div className="todo-completed-list">{tasks.filter(t => t.status === 'completed').map(task => <div key={task.id}><CheckCircle2 size={14}/><span>{task.title}</span><button onClick={() => toggleTask(task)} title="Khôi phục"><RefreshCw size={13}/></button></div>)}</div>}
-    </section>
-
-    {modalOpen && <div className="todo-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget && !saving) setModalOpen(false); }}><section className="todo-modal" role="dialog" aria-modal="true" aria-labelledby="todo-modal-title"><header><div><h3 id="todo-modal-title">{editing ? 'Chỉnh sửa công việc' : 'Thêm công việc mới'}</h3><p>Lưu công việc vào danh sách cá nhân của bạn.</p></div><button onClick={() => setModalOpen(false)} disabled={saving} aria-label="Đóng"><X size={19}/></button></header><form onSubmit={saveTask}><label>Nội dung công việc <em>*</em><input autoFocus maxLength={180} required value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} placeholder="Nhập nội dung cần thực hiện"/></label><label>Ghi chú chi tiết<textarea rows={3} maxLength={2000} value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} placeholder="Thông tin hoặc ghi chú bổ sung (không bắt buộc)"/></label><div className="todo-form-grid"><label>Ngày hết hạn<input type="date" value={form.due_date} onChange={e => setForm(v => ({ ...v, due_date: e.target.value }))}/></label><label>Mức độ ưu tiên<select value={form.priority} onChange={e => setForm(v => ({ ...v, priority: e.target.value }))}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></label></div>{error && <div className="todo-alert todo-alert-error"><AlertCircle size={15}/>{error}</div>}<footer><button type="button" className="todo-secondary" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</button><button type="submit" className="todo-primary" disabled={saving}>{saving ? <Loader2 size={15} className="dashboard-spin"/> : <Check size={15}/>} {editing ? 'Lưu thay đổi' : 'Thêm công việc'}</button></footer></form></section></div>}
+    {modalOpen && <div className="todo-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget && !saving) setModalOpen(false); }}><section className="todo-modal" role="dialog" aria-modal="true" aria-labelledby="todo-modal-title"><header><div><h3 id="todo-modal-title">{editing ? 'Chỉnh sửa ghi chú' : 'Thêm ghi chú mới'}</h3><p>Lưu ghi chú vào danh sách cá nhân của bạn.</p></div><button onClick={() => setModalOpen(false)} disabled={saving} aria-label="Đóng"><X size={19}/></button></header><form onSubmit={saveTask}><label>Nội dung công việc <em>*</em><input autoFocus maxLength={180} required value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} placeholder="Nhập nội dung cần ghi nhớ"/></label><label>Ghi chú chi tiết<textarea rows={3} maxLength={2000} value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} placeholder="Thông tin hoặc ghi chú bổ sung (không bắt buộc)"/></label><div className="todo-form-grid"><label>Ngày hết hạn<input type="date" value={form.due_date} onChange={e => setForm(v => ({ ...v, due_date: e.target.value }))}/></label><label>Mức độ ưu tiên<select value={form.priority} onChange={e => setForm(v => ({ ...v, priority: e.target.value }))}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></label></div>{error && <div className="todo-alert todo-alert-error"><AlertCircle size={15}/>{error}</div>}<footer><button type="button" className="todo-secondary" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</button><button type="submit" className="todo-primary" disabled={saving}>{saving ? <Loader2 size={15} className="dashboard-spin"/> : <Check size={15}/>} {editing ? 'Lưu thay đổi' : 'Thêm ghi chú'}</button></footer></form></section></div>}
   </section>;
 }
