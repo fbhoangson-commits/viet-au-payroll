@@ -53,8 +53,7 @@ const buildEmailMessage = ({row,period}) => {
     <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #dce6ee;border-radius:12px;overflow:hidden;">
       <div style="padding:22px 28px;background:#10324d;color:#ffffff;">
         <div style="font-size:12px;letter-spacing:1.5px;font-weight:700;color:#8fe0d5;">TRƯỜNG THPT VIỆT ÂU</div>
-        <div style="font-size:21px;line-height:1.35;font-weight:700;margin-top:8px;">PHIẾU LƯƠNG</div>
-        <div style="display:block;width:100%;font-size:16px;line-height:1.45;font-weight:600;margin-top:4px;">${esc(displayPeriod)}</div>
+        <div style="font-size:21px;line-height:1.35;font-weight:700;margin-top:8px;">PHIẾU LƯƠNG<br/><span style="display:block;font-size:16px;line-height:1.45;font-weight:600;margin-top:4px;">${esc(periodLabel)}</span></div>
       </div>
       <div style="padding:26px 28px;">
         <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Kính gửi Thầy/Cô <strong>${esc(employeeName)}</strong>,</p>
