@@ -125,6 +125,16 @@ function buildPayBreakdown({row,period,groups,columns,rateValues,teachingRecords
   const otherGroup={title:'4. LƯƠNG DẠY KHÁC',rows:[...mapRows('other',otherDefs),...extraRows('other',otherDefs)]};
   return {fixedRows,teachingRows,teachingGroups:[teachingGroup,tutoringGroup,otherGroup],hasAttendance:records.length>0};
 }
+export function buildPayslipEmailHtml({run,period,row,adjustments=[],approvals=[],rateGroups=[],rateColumns=[],rateValues=[],teachingRecords=[]}) {
+  if (!run || !period || !row) throw new Error('PAYSLIP_DATA_REQUIRED');
+  if (!official(run)) throw new Error('PAYROLL_RUN_MUST_BE_APPROVED_OR_LOCKED');
+  const matched = adjustments.filter(a => adjustmentMatches(a, period, row));
+  const adds = matched.filter(a => String(a.kind || '').toUpperCase() === 'ADD');
+  const deducts = matched.filter(a => String(a.kind || '').toUpperCase() === 'DEDUCT');
+  const breakdown = buildPayBreakdown({row,period,groups:rateGroups,columns:rateColumns,rateValues,teachingRecords});
+  return printHtml({run,period,row,adds,deducts,approvals,breakdown}).replace(/<script>[\s\S]*?<\/script>/gi, '');
+}
+
 function printHtml({run,period,row,adds,deducts,approvals,breakdown}) {
   const net=first(row,['net_pay','net'],null);
   const incomeRows=[
