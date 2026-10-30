@@ -56,7 +56,20 @@ const DEFAULT_FIELDS = [
 ];
 const labelFor = key => LABELS[key] || key.replaceAll('_', ' ').replace(/\b\w/g, x => x.toUpperCase());
 const norm = v => String(v ?? '').trim();
-const isInactive = row => /nghỉ|inactive|terminated|resigned|đã nghỉ/i.test(String(row.status ?? row.employment_status ?? ''));
+const employeeStatusOf = row => norm(row?.status ?? row?.employment_status ?? '').toLocaleLowerCase('vi')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/\s+/g, ' ').trim();
+const isLeaveStatus = row => {
+  const status = employeeStatusOf(row);
+  return /^(nghi khong luong|nghi thai san|nghi bao hiem|tam nghi)$/.test(status)
+    || /^(nghi che do)(\b|$)/.test(status);
+};
+const isTerminated = row => {
+  const status = employeeStatusOf(row);
+  return /^(nghi viec|da nghi viec|terminated|resigned|inactive)$/.test(status);
+};
+// Giữ tương thích với các chỗ hiển thị trạng thái cũ: chỉ "Nghỉ việc" mới là nghỉ việc.
+const isInactive = isTerminated;
+const isWorking = row => !isLeaveStatus(row) && !isTerminated(row);
 const displayName = row => row.full_name || row.name || row.employee_name || row.employee_code || 'Chưa có tên';
 const isInternalKey = k => ['id','created_at','updated_at'].includes(k);
 const isSchemaCacheColumnError = error => /could not find the .* column of 'employees' in the schema cache/i.test(String(error?.message || ''));
@@ -216,9 +229,9 @@ export default function Page() {
 
 
   const filtered = useMemo(() => employees.filter(row => {
-    const inactive = isInactive(row);
-    if (statusFilter === 'active' && inactive) return false;
-    if (statusFilter === 'inactive' && !inactive) return false;
+    if (statusFilter === 'active' && !isWorking(row)) return false;
+    if (statusFilter === 'leave' && !isLeaveStatus(row)) return false;
+    if (statusFilter === 'inactive' && !isTerminated(row)) return false;
     if (search) {
       const hay = Object.values(row).map(v => typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).join(' ').toLocaleLowerCase('vi');
       if (!hay.includes(search.toLocaleLowerCase('vi'))) return false;
@@ -356,8 +369,9 @@ export default function Page() {
   }
 
   const statTotal = employees.length;
-  const statInactive = employees.filter(isInactive).length;
-  const statActive = statTotal - statInactive;
+  const statWorking = employees.filter(isWorking).length;
+  const statLeave = employees.filter(isLeaveStatus).length;
+  const statInactive = employees.filter(isTerminated).length;
 
   return <section className="em-page">
     <div className="em-title-row">
@@ -373,20 +387,21 @@ export default function Page() {
     </div>
     <div className="em-stats">
       <div className="em-stat"><span className="em-stat-icon blue"><Users size={18}/></span><div><small>Tổng nhân sự</small><strong>{statTotal}</strong></div></div>
-      <div className="em-stat"><span className="em-stat-icon green"><UserCheck size={18}/></span><div><small>Đang làm việc</small><strong>{statActive}</strong></div></div>
-      <div className="em-stat"><span className="em-stat-icon amber"><UserX size={18}/></span><div><small>Đã nghỉ việc</small><strong>{statInactive}</strong></div></div>
+      <div className="em-stat"><span className="em-stat-icon green"><UserCheck size={18}/></span><div><small>Đang làm việc</small><strong>{statWorking}</strong></div></div>
+      <div className="em-stat"><span className="em-stat-icon amber"><UserCheck size={18}/></span><div><small>Nghỉ chế độ</small><strong>{statLeave}</strong></div></div>
+      <div className="em-stat"><span className="em-stat-icon red"><UserX size={18}/></span><div><small>Nghỉ việc</small><strong>{statInactive}</strong></div></div>
     </div>
     {notice && <div className={`em-alert success`}><CheckCircle2 size={17}/>{notice.text}<button onClick={()=>setNotice(null)} aria-label="Đóng"><X size={15}/></button></div>}
     {error && <div className="em-alert danger"><AlertCircle size={17}/><span>{error}</span><button onClick={()=>setError('')} aria-label="Đóng"><X size={15}/></button></div>}
     {configWarning && <div className="em-alert danger"><AlertCircle size={17}/><span>{configWarning}</span><button onClick={()=>setConfigWarning('')} aria-label="Đóng"><X size={15}/></button></div>}
     <div className="em-toolbar">
       <div className="em-search"><Search size={17}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Tìm mã nhân viên, họ tên, phòng ban..."/></div>
-      <div className="em-filters"><Filter size={16}/><select value={statusFilter} onChange={e=>{setStatusFilter(e.target.value);setPage(1);}}><option value="active">Đang làm việc</option><option value="inactive">Đã nghỉ việc</option><option value="all">Tất cả nhân sự</option></select><select value={filterField} onChange={e=>{setFilterField(e.target.value);setFilterValue('');setPage(1);}}><option value="">Chọn trường lọc</option>{fields.filter(f=>!isInternalKey(f.key)).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}</select>{filterField && <select value={filterValue} onChange={e=>{setFilterValue(e.target.value);setPage(1);}}><option value="">Tất cả giá trị</option>{filterValues.map(v=><option key={v} value={v}>{v}</option>)}</select>}</div>
+      <div className="em-filters"><Filter size={16}/><select value={statusFilter} onChange={e=>{setStatusFilter(e.target.value);setPage(1);}}><option value="active">Đang làm việc</option><option value="leave">Nghỉ chế độ</option><option value="inactive">Nghỉ việc</option><option value="all">Tất cả nhân sự</option></select><select value={filterField} onChange={e=>{setFilterField(e.target.value);setFilterValue('');setPage(1);}}><option value="">Chọn trường lọc</option>{fields.filter(f=>!isInternalKey(f.key)).map(f=><option key={f.key} value={f.key}>{f.label}</option>)}</select>{filterField && <select value={filterValue} onChange={e=>{setFilterValue(e.target.value);setPage(1);}}><option value="">Tất cả giá trị</option>{filterValues.map(v=><option key={v} value={v}>{v}</option>)}</select>}</div>
       <button className="em-icon-btn" title="Tải lại dữ liệu" onClick={reload}><RefreshCw size={17}/></button>
     </div>
     <div className="em-table-wrap">
       <table className="em-table"><thead><tr>{listFields.map(f=><th key={f.key}>{f.label.toLocaleUpperCase('vi')}</th>)}<th></th></tr></thead>
-      <tbody>{loading ? <tr><td colSpan={listFields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{listFields.map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isInactive(row)?'inactive':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
+      <tbody>{loading ? <tr><td colSpan={listFields.length+1} className="em-empty"><RefreshCw className="em-spin" size={20}/> Đang tải dữ liệu từ Supabase…</td></tr> : error && !employees.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><ShieldAlert size={22}/><strong>Không thể tải dữ liệu</strong><span>Kiểm tra cấu hình Supabase, schema bảng employees và chính sách RLS.</span></td></tr> : !visible.length ? <tr><td colSpan={listFields.length+1} className="em-empty"><Users size={25}/><strong>Chưa có hồ sơ nhân sự phù hợp</strong><span>Danh sách sẽ hiển thị khi có dữ liệu nhân sự trong Supabase.</span></td></tr> : visible.map(row=><tr key={row.id || row.employee_code}>{listFields.map(f=><td key={f.key}>{f.key==='employee_code' ? <span className="em-code">{valueForField(row,f.key) || '—'}</span> : ['full_name','name','employee_name'].includes(f.key) ? <button className="em-name" onClick={()=>openDetails(row)}>{valueForField(row,f.key) || displayName(row)}</button> : f.key==='status' || f.key==='employment_status' ? <span className={`em-status ${isTerminated(row)?'inactive':isLeaveStatus(row)?'leave':'active'}`}>{valueForField(row,f.key) || 'Đang làm việc'}</span> : String(valueForField(row,f.key) ?? '—')}</td>)}<td><button className="em-icon-btn" title="Xem hồ sơ" onClick={()=>openDetails(row)}><Eye size={16}/></button></td></tr>)}</tbody></table>
       <div className="em-table-footer"><span>{filtered.length} hồ sơ · Cuộn dọc để xem toàn bộ danh sách</span></div>
     </div>
     <div className="em-permission-note"><ShieldAlert size={15}/><span>Quyền đọc/ghi được kiểm soát bởi phiên đăng nhập và chính sách RLS của Supabase. Hồ sơ tài khoản: {profile?.appUser ? 'đã tìm thấy trong app_users' : 'chưa xác minh được ánh xạ app_users; thao tác sẽ tuân theo RLS'}.</span></div>
