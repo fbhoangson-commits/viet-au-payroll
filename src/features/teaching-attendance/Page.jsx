@@ -178,13 +178,16 @@ export default function Page() {
         setNotice({ type: 'info', text: 'Chưa có Kỳ Lương. Hãy tạo kỳ tại mục Quản Lý Kỳ Lương trước.' });
         return;
       }
-      const [snapshotResult, recordsResult] = await Promise.all([
+      const [snapshotResult, membershipResult, recordsResult] = await Promise.all([
         fetchAll(() => supabase.from(SNAPSHOTS).select('*').eq('period_id', nextId).order('employee_code_snapshot')),
+        fetchAll(() => supabase.from('payroll_period_employees').select('employee_id').eq('period_id', nextId)),
         fetchAll(() => supabase.from(RECORDS).select('*').eq('period_id', nextId).order('employee_id')),
       ]);
-      setSnapshots(snapshotResult || []);
+      const memberIds = new Set((membershipResult || []).map(x => x.employee_id));
+      const selectedSnapshots = (snapshotResult || []).filter(x => memberIds.has(x.employee_id));
+      setSnapshots(selectedSnapshots);
       setRecords(recordsResult || []);
-      if (!(snapshotResult || []).length) setNotice({ type: 'info', text: 'Kỳ này chưa có danh sách nhân sự chốt. Module chỉ sử dụng snapshot của kỳ, không tự lấy danh sách nhân sự hiện tại.' });
+      if (!selectedSnapshots.length) setNotice({ type: 'info', text: 'Kỳ này chưa có danh sách nhân sự chốt. Module chỉ sử dụng snapshot của kỳ, không tự lấy danh sách nhân sự hiện tại.' });
       else setNotice({ type: 'success', text: 'Đã tải cấu hình định mức, đơn giá và số tiết từ Supabase.' });
     } catch (e) {
       setNotice({ type: 'error', text: `Không tải được Chấm Công Tiết Dạy: ${errorText(e)}. Kiểm tra schema, migration và RLS.` });
@@ -198,13 +201,16 @@ export default function Page() {
     (async () => {
       setLoading(true); setNotice(null);
       try {
-        const [snapshotRows, recordRows] = await Promise.all([
+        const [snapshotRows, membershipRows, recordRows] = await Promise.all([
           fetchAll(() => supabase.from(SNAPSHOTS).select('*').eq('period_id', periodId).order('employee_code_snapshot')),
+          fetchAll(() => supabase.from('payroll_period_employees').select('employee_id').eq('period_id', periodId)),
           fetchAll(() => supabase.from(RECORDS).select('*').eq('period_id', periodId).order('employee_id')),
         ]);
         if (!alive) return;
-        setSnapshots(snapshotRows); setRecords(recordRows);
-        if (!snapshotRows.length) setNotice({ type: 'info', text: 'Kỳ này chưa có danh sách nhân sự chốt. Hãy kiểm tra Quản Lý Kỳ Lương/Chấm Công Ngày.' });
+        const memberIds = new Set((membershipRows || []).map(x => x.employee_id));
+        const selectedSnapshots = (snapshotRows || []).filter(x => memberIds.has(x.employee_id));
+        setSnapshots(selectedSnapshots); setRecords(recordRows);
+        if (!selectedSnapshots.length) setNotice({ type: 'info', text: 'Kỳ này chưa có danh sách nhân sự chốt. Hãy kiểm tra Quản Lý Kỳ Lương/Chấm Công Ngày.' });
       } catch (e) { if (alive) setNotice({ type: 'error', text: `Không tải được dữ liệu của kỳ: ${errorText(e)}` }); }
       finally { if (alive) setLoading(false); }
     })();

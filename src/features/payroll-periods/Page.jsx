@@ -212,10 +212,13 @@ export default function Page() {
         const addEmployees = currentEmployees.filter(x => !existingIds.has(x.id));
         const addSnapshotEmployees = currentEmployees.filter(x => !existingSnapshotIds.has(x.id));
         if (removeIds.length) {
-          const { error: deleteMembershipError } = await supabase.from('payroll_period_employees').delete().eq('period_id', period.id).in('employee_id', removeIds);
+          const { data: deletedMembers, error: deleteMembershipError } = await supabase.from('payroll_period_employees').delete().eq('period_id', period.id).in('employee_id', removeIds).select('employee_id');
           if (deleteMembershipError) throw new Error(`Không thể bỏ nhân sự khỏi danh sách kỳ: ${deleteMembershipError.message}`);
-          const { error: deleteSnapshotError } = await supabase.from('payroll_period_employee_snapshots').delete().eq('period_id', period.id).in('employee_id', removeIds);
-          if (deleteSnapshotError) throw new Error(`Đã cập nhật danh sách kỳ nhưng không đồng bộ được snapshot chấm công: ${deleteSnapshotError.message}`);
+          const deletedMemberIds = new Set((deletedMembers || []).map(x => x.employee_id));
+          const stillMembers = removeIds.filter(id => !deletedMemberIds.has(id));
+          if (stillMembers.length) throw new Error(`Supabase không xác nhận đã bỏ ${stillMembers.length} nhân sự khỏi payroll_period_employees. Có thể quyền RLS đang chặn DELETE. Chưa thể xác nhận danh sách mới.`);
+          const { data: deletedSnapshots, error: deleteSnapshotError } = await supabase.from('payroll_period_employee_snapshots').delete().eq('period_id', period.id).in('employee_id', removeIds).select('employee_id');
+          if (deleteSnapshotError) throw new Error(`Đã bỏ nhân sự khỏi danh sách kỳ nhưng không đồng bộ được snapshot chấm công: ${deleteSnapshotError.message}`);
         }
         if (addEmployees.length) {
           const rows = addEmployees.map(e => ({ period_id: period.id, employee_id: e.id, employee_code: employeeCode(e), employee_name: employeeName(e), department: e.department || e['Phòng Ban'] || null, position: e.position || e.job_title || e['Chức Vụ'] || null,
@@ -236,7 +239,13 @@ export default function Page() {
           const b = await supabase.from('payroll_period_employee_snapshots').update(flags).eq('period_id', period.id).eq('employee_id', e.id);
           if (b.error) throw new Error(`Không đồng bộ được cờ BHXH/thuế snapshot của ${employeeCode(e)}: ${b.error.message}`);
         }
-        const countUpdate = await supabase.from(TABLE).update({ employee_count: currentEmployees.length }).eq('id', period.id);
+        const { data: verifiedMembers, error: verifyMembershipError } = await supabase.from('payroll_period_employees').select('employee_id').eq('period_id', period.id);
+        if (verifyMembershipError) throw new Error(`Không xác minh được danh sách nhân sự sau khi lưu: ${verifyMembershipError.message}`);
+        const verifiedIds = new Set((verifiedMembers || []).map(x => x.employee_id));
+        const expectedIds = new Set(currentEmployees.map(x => x.id));
+        const mismatch = verifiedIds.size !== expectedIds.size || [...expectedIds].some(id => !verifiedIds.has(id));
+        if (mismatch) throw new Error(`Danh sách Supabase chưa khớp lựa chọn: đã lưu ${verifiedIds.size}/${expectedIds.size} nhân sự. Kiểm tra RLS hoặc quyền ghi bảng payroll_period_employees.`);
+        const countUpdate = await supabase.from(TABLE).update({ employee_count: verifiedIds.size }).eq('id', period.id);
         if (countUpdate.error) throw new Error(`Không cập nhật được số lượng nhân sự: ${countUpdate.error.message}`);
       }
       if (!editingId && form.type === 'EVENT') {

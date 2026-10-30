@@ -112,14 +112,17 @@ export default function Page() {
     }
     const results = await Promise.all([
       supabase.from(SNAPSHOTS).select('*').eq('period_id', id).order('employee_code_snapshot'),
+      supabase.from('payroll_period_employees').select('employee_id').eq('period_id', id),
       supabase.from(SETTINGS).select('*').eq('period_id', id).maybeSingle(),
       supabase.from(CODES).select('*').eq('is_active', true).order('display_order').order('code'),
       fetchAllRows(() => supabase.from(RECORDS).select('*').eq('period_id', id).order('work_date').order('employee_id')),
       supabase.from('salary_workday_norms').select('employee_id,policy_version_id,workday_count').eq('policy_version_id', periods.find(p => p.id === id)?.salary_version_id || '00000000-0000-0000-0000-000000000000'),
     ]);
-    const [s, c, k, r, n] = results;
+    const [s, membership, c, k, r, n] = results;
     for (const result of results) if (result.error) throw result.error;
-    setSnapshots(s.data || []); setSettings(c.data || null); setCodes(k.data || []); setRecords(Array.isArray(r) ? r : (r.data || [])); setWorkdayNorms(n.data || []);
+    const memberIds = new Set((membership.data || []).map(x => x.employee_id));
+    const authoritativeSnapshots = (s.data || []).filter(row => memberIds.has(row.employee_id));
+    setSnapshots(authoritativeSnapshots); setSettings(c.data || null); setCodes(k.data || []); setRecords(Array.isArray(r) ? r : (r.data || [])); setWorkdayNorms(n.data || []);
     setStandard26Days(String(c.data?.standard_26_days ?? 26));
     setStandard28Days(String(c.data?.standard_28_days ?? 28));
     setConfigNote(c.data?.notes || '');
