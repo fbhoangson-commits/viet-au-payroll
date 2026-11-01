@@ -320,7 +320,7 @@ export default function PayrollCalculationPage({ page }) {
         // A manual override is the only persisted taxable-income value that supersedes the source calculation.
         const taxInsuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
         const taxInsuranceAmount=!excludeInsurance&&(tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*taxInsuranceRate/100 : 0;
-        const calculatedTaxable=isPermanent ? Math.max(0,gross-employeeSupport-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-taxInsuranceAmount) : Math.max(0,fixed+teaching+additions-deductions);
+        const calculatedTaxable=isPermanent ? Math.max(0,gross-employeeSupport-deductions-supportAmount-reliefPersonal-dependentCount*reliefDependent-taxInsuranceAmount) : Math.max(0,fixed+teaching+additions);
         const taxable=excludeTax?0:Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:calculatedTaxable));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
         const taxAmount=excludeTax?0:estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
