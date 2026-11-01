@@ -292,12 +292,8 @@ export default function PayrollCalculationPage({ page }) {
         const employeeAdjustments=periodAdjustments.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && appliesAdjustment(r));
         const addRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='ADD');
         const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
-        // Match Dữ Liệu Kỳ Lương/Khoản bổ sung: when amount is not stored,
-        // derive the adjustment from quantity × unit_price. This prevents
-        // Tính Lương from silently treating a valid adjustment as 0.
-        const adjustmentAmount=r=>num(r.amount ?? (num(r.quantity)*num(r.unit_price)));
-        const additions=addRows.reduce((sum,r)=>sum+adjustmentAmount(r),0);
-        const deductions=deductRows.reduce((sum,r)=>sum+adjustmentAmount(r),0);
+        const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
+        const deductions=deductRows.reduce((sum,r)=>sum+num(r.amount),0);
         const employeeSupportData=supportByEmployee.get(id)||{amount:0,tax:0,count:0,items:[]};
         const employeeSupport=employeeSupportData.amount;
         const supportTax=employeeSupportData.tax;
@@ -312,13 +308,16 @@ export default function PayrollCalculationPage({ page }) {
         const employerInsurance=excludeInsurance?0:num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
         const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
-        const classification=classificationOf(master,s,tax);
-        // The period-specific tax record is authoritative for this payroll period.
-        // Employee Master is only a fallback: its classification may differ from
-        // the employee type explicitly selected in Dữ Liệu Kỳ Lương.
-        // Use the period's displayed/effective classification first. A stale employee_type
-        // in the tax record must not override the period classification (e.g. Hợp Đồng).
-        const employeeType=firstText(classification,tax.employee_type,tax.employee_classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification);
+        // Phân loại đã chốt trong snapshot nhân sự của kỳ lương là nguồn ưu tiên.
+        // Sau đó mới dùng dữ liệu thuế kỳ lương; Employee Master chỉ là nguồn dự phòng.
+        // Tránh lấy nhầm phân loại hồ sơ gốc để chọn sai nhánh tính thuế của kỳ hiện tại.
+        const classification=classificationOf(s,tax,master);
+        const employeeType=firstText(
+          classification,
+          s.employee_type,s.employee_classification,
+          tax.employee_type,tax.employee_classification,
+          master.employee_type,master.employee_classification
+        );
         const gross=fixed+teaching+additions+employeeSupport;
         const dependentCount=dependentCountFor(id,code,master,s);
         const supportAmount=num(tax.support_amount ?? supportFor(id,code));
