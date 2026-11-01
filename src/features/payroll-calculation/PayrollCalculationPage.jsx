@@ -15,7 +15,7 @@ const num = value => {
   return Number.isFinite(n) ? n : 0;
 };
 const clean = v => String(v ?? '').trim();
-const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
+const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLocaleLowerCase('vi');
 const codeOf = e => clean(e?.employee_code || e?.employee_code_snapshot || e?.code || '');
 const nameOf = e => clean(e?.employee_name_snapshot || e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
 const periodTitle = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?.period_year || ''}-${String(p?.period_month || '').padStart(2,'0')}`);
