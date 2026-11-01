@@ -260,7 +260,7 @@ export default function PayrollCalculationPage({ page }) {
           // different/missing policy_version_id while still being the employee's configured rate.
           const recordEmployeeId=employeeId(rec);
           const recordEmployeeCode=codeOf(rec).toLocaleUpperCase('vi');
-          const rateRowsForEmployee=rateValues.filter(v =>
+          const rateRowsForEmployee=policyRateValues.filter(v =>
             (recordEmployeeId && employeeId(v)===recordEmployeeId) ||
             (recordEmployeeCode && codeOf(v).toLocaleUpperCase('vi')===recordEmployeeCode)
           );
@@ -271,7 +271,7 @@ export default function PayrollCalculationPage({ page }) {
           const preferredRows=[
             ...rateRowsForEmployee.filter(v=>activePolicy?.id && clean(v.policy_version_id)===clean(activePolicy.id)),
             ...rateRowsForEmployee.filter(v=>!activePolicy?.id || clean(v.policy_version_id)!==clean(activePolicy.id)),
-            ...rateRows.filter(v=>!rateRowsForEmployee.includes(v)),
+            ...policyRateValues.filter(v=>!rateRowsForEmployee.includes(v)),
           ].filter(v=>clean(v.group_id)===clean(col.group_id));
           const rateKeys=[col.id,col.code,col.name,col.label].filter(v=>v!==undefined&&v!==null&&clean(v)!=='').map(clean);
           let rate;
