@@ -68,17 +68,15 @@ function tax5(value) {
   return Math.round(x*.35-14500000);
 }
 function estimateTax(row, taxableValue) {
-  // Đồng bộ đúng quy tắc hiển thị tại /insurance-tax-data:
-  // dùng dữ liệu điều chỉnh theo kỳ từ payroll_period_insurance_tax_data;
-  // cam kết đã xác minh => 0; Cơ Hữu => biểu thuế 5 bậc; nhóm còn lại => khấu trừ 10%.
-  // Bảng dữ liệu kỳ hiện lưu đầu vào/giá trị điều chỉnh, không lưu riêng số thuế đã tính.
+  // Keep the same rule as /insurance-tax-data: validated commitment => 0;
+  // otherwise calculate from the current taxable income and employee type.
   if (row?.has_commitment && row?.commitment_validated) return 0;
   const rawOverride = row?.taxable_income_override;
   const taxable = Math.max(0, num(rawOverride !== '' && rawOverride !== null && rawOverride !== undefined
     ? rawOverride
     : taxableValue ?? row?.calculated_taxable_income ?? row?.taxable_income));
   const type = norm(row?.employee_type || row?.employee_classification);
-  return type.includes('co huu') ? tax5(taxable) : Math.round(taxable * .1);
+  return type.includes('co huu') ? tax5(taxable) : taxable >= 5000000 ? Math.round(taxable * .1) : 0;
 }
 function firstDefined(row, keys) {
   for (const key of keys) if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
