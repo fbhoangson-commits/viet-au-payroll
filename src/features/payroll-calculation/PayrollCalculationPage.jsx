@@ -15,7 +15,7 @@ const num = value => {
   return Number.isFinite(n) ? n : 0;
 };
 const clean = v => String(v ?? '').trim();
-const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLocaleLowerCase('vi');
+const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
 const codeOf = e => clean(e?.employee_code || e?.employee_code_snapshot || e?.code || '');
 const nameOf = e => clean(e?.employee_name_snapshot || e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
 const periodTitle = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?.period_year || ''}-${String(p?.period_month || '').padStart(2,'0')}`);
@@ -183,9 +183,26 @@ export default function PayrollCalculationPage({ page }) {
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
       const masterById=new Map(employees.map(e=>[clean(e.id),e]));
       const selectedPeriod=fixedPeriods.find(p=>p.id===selectedId)||{};
-      const selectedSupportLinks=(supportPeriodLinks||[]).filter(r=>rowPeriodId(r)===selectedId&&r.employee_id);
+      // Hỗ trợ nhân sự được liên kết theo employee_id và lưu mã nhân viên snapshot.
+      // Đối chiếu cả hai khóa để không bỏ sót khoản hỗ trợ nếu ID ở snapshot kỳ lương
+      // khác ID trong liên kết, trong khi mã nhân viên vẫn khớp.
+      const selectedSupportLinks=(supportPeriodLinks||[]).filter(r=>rowPeriodId(r)===selectedId);
       const supportByEmployee=new Map();
-      for(const r of selectedSupportLinks){const k=employeeId(r);if(!supportByEmployee.has(k))supportByEmployee.set(k,{amount:0,tax:0,count:0,items:[]});const v=supportByEmployee.get(k);v.amount+=num(r.amount_snapshot);v.tax+=num(r.tax_amount_snapshot);v.count++;v.items.push(r);}
+      const addSupportIndex=(key,r)=>{
+        if(!key)return;
+        if(!supportByEmployee.has(key))supportByEmployee.set(key,{amount:0,tax:0,count:0,items:[]});
+        const v=supportByEmployee.get(key);
+        v.amount+=num(r.amount_snapshot);
+        v.tax+=num(r.tax_amount_snapshot);
+        v.count++;
+        v.items.push(r);
+      };
+      for(const r of selectedSupportLinks){
+        const idKey=employeeId(r);
+        const codeKey=clean(r.employee_code_snapshot||r.employee_code).toLocaleUpperCase('vi');
+        if(idKey)addSupportIndex(`id:${idKey}`,r);
+        if(codeKey)addSupportIndex(`code:${codeKey}`,r);
+      }
       const selectedRateVersion=(rateVersionRows||[]).find(v=>v.id===selectedPeriod.salary_rate_version_id);
       const effectiveGroups=Array.isArray(selectedRateVersion?.groups_snapshot)&&selectedRateVersion.groups_snapshot.length?selectedRateVersion.groups_snapshot:groups;
       const effectiveColumns=Array.isArray(selectedRateVersion?.columns_snapshot)&&selectedRateVersion.columns_snapshot.length?selectedRateVersion.columns_snapshot:columns;
@@ -307,7 +324,9 @@ export default function PayrollCalculationPage({ page }) {
         const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
         const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
         const deductions=deductRows.reduce((sum,r)=>sum+num(r.amount),0);
-        const employeeSupportData=supportByEmployee.get(id)||{amount:0,tax:0,count:0,items:[]};
+        const employeeSupportData=supportByEmployee.get(`id:${id}`)
+          ||supportByEmployee.get(`code:${code.toLocaleUpperCase('vi')}`)
+          ||{amount:0,tax:0,count:0,items:[]};
         const employeeSupport=employeeSupportData.amount;
         const supportTax=employeeSupportData.tax;
         const tax=taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{};
