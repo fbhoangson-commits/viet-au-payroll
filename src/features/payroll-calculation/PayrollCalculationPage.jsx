@@ -93,10 +93,23 @@ function fieldFromObject(obj, candidates) {
   return '';
 }
 function classificationOf(...objects) {
-  const candidates = ['Phân loại','phan loai','employment_type','employee_type','employee_classification','classification','loai nhan su','loại nhân sự','contract_type','nhom nhan su'];
+  // Prefer the explicit HR classification ("Phân loại") over generic
+  // employee_type fields, which may contain a job group such as "Giáo viên".
+  const explicit = ['Phân loại','phan loai','employee_classification','classification','contract_type','employment_type','loai nhan su','loại nhân sự'];
+  const generic = ['employee_type','nhom nhan su'];
   for (const obj of objects) {
-    const direct = fieldFromObject(obj,candidates); if (direct) return clean(direct);
-    const nested = fieldFromObject(obj?.custom_fields,candidates) || fieldFromObject(obj?.metadata,candidates); if (nested) return clean(nested);
+    const direct = fieldFromObject(obj, explicit);
+    if (direct) return clean(direct);
+    const nested = fieldFromObject(obj?.custom_fields, explicit)
+      || fieldFromObject(obj?.metadata, explicit);
+    if (nested) return clean(nested);
+  }
+  for (const obj of objects) {
+    const direct = fieldFromObject(obj, generic);
+    if (direct) return clean(direct);
+    const nested = fieldFromObject(obj?.custom_fields, generic)
+      || fieldFromObject(obj?.metadata, generic);
+    if (nested) return clean(nested);
   }
   return '';
 }
