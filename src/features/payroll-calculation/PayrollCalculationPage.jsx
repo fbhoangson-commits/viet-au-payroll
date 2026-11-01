@@ -309,7 +309,10 @@ export default function PayrollCalculationPage({ page }) {
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
         const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         const classification=classificationOf(master,s,tax);
-        const employeeType=firstText(classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification,tax.employee_type,tax.employee_classification);
+        // The period-specific tax record is authoritative for this payroll period.
+        // Employee Master is only a fallback: its classification may differ from
+        // the employee type explicitly selected in Dữ Liệu Kỳ Lương.
+        const employeeType=firstText(tax.employee_type,tax.employee_classification,classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification);
         const gross=fixed+teaching+additions+employeeSupport;
         const dependentCount=dependentCountFor(id,code,master,s);
         const supportAmount=num(tax.support_amount ?? supportFor(id,code));
@@ -360,25 +363,10 @@ export default function PayrollCalculationPage({ page }) {
     if(!periodId || !supabase || !isSupabaseConfigured) return undefined;
     let active=true;
     let debounceTimer=null;
-    let refreshPending=false;
     const refreshLatest=()=>{
-      if(!active || document.visibilityState==='hidden') return;
-      // Do not discard a source-data change that arrives while a previous
-      // refresh is still loading. Queue one follow-up refresh instead.
-      if(autoRefreshBusyRef.current){
-        refreshPending=true;
-        return;
-      }
+      if(!active || document.visibilityState==='hidden' || autoRefreshBusyRef.current) return;
       autoRefreshBusyRef.current=true;
-      refreshPending=false;
-      Promise.resolve(load(true)).finally(()=>{
-        autoRefreshBusyRef.current=false;
-        if(active && refreshPending && document.visibilityState!=='hidden'){
-          refreshPending=false;
-          if(debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer=setTimeout(refreshLatest,150);
-        }
-      });
+      load(true).finally(()=>{autoRefreshBusyRef.current=false;});
     };
     const scheduleRefresh=()=>{
       if(debounceTimer) clearTimeout(debounceTimer);
