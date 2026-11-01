@@ -319,7 +319,7 @@ export default function PayrollCalculationPage({ page }) {
         const reliefPersonal=num(tax.personal_relief_amount ?? defaultTaxConfig.personal_relief_amount ?? 15500000);
         const reliefDependent=num(tax.dependent_relief_amount ?? defaultTaxConfig.dependent_relief_amount ?? 6200000);
         const override=tax.taxable_income_override;
-        const employeeTypeKey=norm(employeeType).replace(/[^a-z0-9]/g,'');
+        const employeeTypeKey=norm(`${employeeType} ${classification}`).replace(/[^a-z0-9]/g,'');
         const isPermanent=norm(employeeType).includes('co huu');
         const isContractOrGuest=employeeTypeKey.includes('hopdong')||employeeTypeKey.includes('contract')||employeeTypeKey.includes('thinhgiang')||employeeTypeKey.includes('guestlecturer');
         // Keep the existing Cơ Hữu formula unchanged. Hợp Đồng and Thỉnh Giảng
@@ -340,7 +340,17 @@ export default function PayrollCalculationPage({ page }) {
           : (override!==''&&override!==null&&override!==undefined?override:calculatedTaxable);
         const taxable=excludeTax?0:Math.max(0,num(taxableBase));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
-        const taxAmount=excludeTax?0:estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
+        // Hợp Đồng / Thỉnh Giảng phải tính thuế trên taxable đã tính từ cấu phần
+        // lương kỳ hiện tại (đã trừ Khoản Trừ), không dùng taxable_income_override
+        // cũ trong bản ghi thuế để ghi đè lại căn cứ tính thuế.
+        const taxAmount=excludeTax?0:estimateTax({
+          ...commitment,
+          ...tax,
+          has_commitment:tax.has_commitment??commitment.has_commitment??false,
+          commitment_validated:tax.commitment_validated??false,
+          employee_type:employeeType,
+          taxable_income_override:isContractOrGuest?null:tax.taxable_income_override,
+        },taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
         const status=[];
         if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
