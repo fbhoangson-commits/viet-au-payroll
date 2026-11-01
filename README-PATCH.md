@@ -1,14 +1,11 @@
-# PATCH – Ưu tiên phân loại kỳ lương cho Hợp Đồng / Thỉnh Giảng
+# PATCH – Sửa thứ tự ưu tiên phân loại nhân sự khi tính lương
 
 ## File thay thế
 `src/features/payroll-calculation/PayrollCalculationPage.jsx`
 
-## Sửa gì
-- Ưu tiên `classification` đang được xác định cho kỳ lương trước `tax.employee_type` cũ.
-- Nếu phân loại hiệu lực là Hợp Đồng hoặc Thỉnh Giảng, nhánh này được ưu tiên và không bị nhánh Cơ Hữu kích hoạt bởi `employee_type` cũ/mâu thuẫn.
-- Không thay đổi công thức Cơ Hữu; không thay đổi công thức thuế, BHXH, Công đoàn hoặc dữ liệu Supabase.
+## Thay đổi duy nhất
+Đổi `classificationOf(master,s,tax)` thành `classificationOf(s,tax,master)`.
 
-## Kiểm tra logic
-Với VA104: 12.275.000 + 8.107.794 + 400.000 - 438.393 = 20.344.401.
+Hàm `classificationOf` trả về giá trị đầu tiên tìm thấy. Do đó dữ liệu kỳ lương và dữ liệu thuế của kỳ được ưu tiên trước Employee Master, tránh phân loại cũ trong Master làm chọn nhầm nhánh tính.
 
-Chỉ thay file nêu trên. Chưa chạy build production trong môi trường này.
+Không thay công thức tính, `estimateTax`, override, Realtime, BHXH, Công đoàn hoặc dữ liệu Supabase.

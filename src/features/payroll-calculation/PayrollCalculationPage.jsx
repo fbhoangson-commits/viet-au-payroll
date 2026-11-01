@@ -308,7 +308,7 @@ export default function PayrollCalculationPage({ page }) {
         const employerInsurance=excludeInsurance?0:num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
         const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
-        const classification=classificationOf(master,s,tax);
+        const classification=classificationOf(s,tax,master);
         // The period-specific tax record is authoritative for this payroll period.
         // Employee Master is only a fallback: its classification may differ from
         // the employee type explicitly selected in Dữ Liệu Kỳ Lương.
