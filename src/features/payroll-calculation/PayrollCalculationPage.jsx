@@ -360,10 +360,25 @@ export default function PayrollCalculationPage({ page }) {
     if(!periodId || !supabase || !isSupabaseConfigured) return undefined;
     let active=true;
     let debounceTimer=null;
+    let refreshPending=false;
     const refreshLatest=()=>{
-      if(!active || document.visibilityState==='hidden' || autoRefreshBusyRef.current) return;
+      if(!active || document.visibilityState==='hidden') return;
+      // Do not discard a source-data change that arrives while a previous
+      // refresh is still loading. Queue one follow-up refresh instead.
+      if(autoRefreshBusyRef.current){
+        refreshPending=true;
+        return;
+      }
       autoRefreshBusyRef.current=true;
-      load(true).finally(()=>{autoRefreshBusyRef.current=false;});
+      refreshPending=false;
+      Promise.resolve(load(true)).finally(()=>{
+        autoRefreshBusyRef.current=false;
+        if(active && refreshPending && document.visibilityState!=='hidden'){
+          refreshPending=false;
+          if(debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer=setTimeout(refreshLatest,150);
+        }
+      });
     };
     const scheduleRefresh=()=>{
       if(debounceTimer) clearTimeout(debounceTimer);
