@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase, isSupabaseConfigured } from '../../shared/supabase.js';
 import { RefreshCw, Search, Download, AlertTriangle, Users, Wallet, Calculator, ShieldCheck, FileSpreadsheet, CircleDollarSign } from 'lucide-react';
@@ -127,6 +127,7 @@ export default function PayrollCalculationPage({ page }) {
   const [savingRun,setSavingRun] = useState(false);
   const [saveRunMessage,setSaveRunMessage] = useState('');
   const [saveRunError,setSaveRunError] = useState('');
+  const autoRefreshBusyRef = useRef(false);
 
   const load = useCallback(async (keepPeriod=true) => {
     if (!isSupabaseConfigured || !supabase) {
@@ -351,6 +352,64 @@ export default function PayrollCalculationPage({ page }) {
 
   useEffect(()=>{load(false);},[]);
   useEffect(()=>{if(periodId) load(true);},[periodId]);
+
+  // Keep payroll calculation synchronized with source data changed in other modules.
+  // Supabase Realtime provides immediate refreshes; periodic polling is a fallback
+  // for tables that are not enabled in the project's Realtime publication.
+  useEffect(()=>{
+    if(!periodId || !supabase || !isSupabaseConfigured) return undefined;
+    let active=true;
+    let debounceTimer=null;
+    const refreshLatest=()=>{
+      if(!active || document.visibilityState==='hidden' || autoRefreshBusyRef.current) return;
+      autoRefreshBusyRef.current=true;
+      load(true).finally(()=>{autoRefreshBusyRef.current=false;});
+    };
+    const scheduleRefresh=()=>{
+      if(debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer=setTimeout(refreshLatest,400);
+    };
+    const sourceTables=[
+      'payroll_periods',
+      'payroll_period_employees',
+      'payroll_period_employee_snapshots',
+      'employees',
+      'salary_rate_groups',
+      'salary_rate_columns',
+      'salary_rate_values',
+      'salary_rate_version_values',
+      'salary_rate_versions',
+      'salary_policy_versions',
+      'teaching_attendance_records',
+      'payroll_adjustments',
+      'payroll_period_insurance_tax_data',
+      'employee_insurance_profiles',
+      'employee_tax_dependents',
+      'employee_support_allowances',
+      'employee_support_period_links',
+      'daily_attendance_records',
+      'employee_union_profiles',
+      'payroll_tax_relief_config',
+      'employee_income_commitments'
+    ];
+    let channel=supabase.channel(`payroll-calculation-live-${periodId}`);
+    sourceTables.forEach(table=>{
+      channel=channel.on('postgres_changes',{event:'*',schema:'public',table},scheduleRefresh);
+    });
+    channel.subscribe();
+    const pollId=setInterval(refreshLatest,15000);
+    const onFocus=()=>refreshLatest();
+    window.addEventListener('focus',onFocus);
+    document.addEventListener('visibilitychange',onFocus);
+    return ()=>{
+      active=false;
+      if(debounceTimer) clearTimeout(debounceTimer);
+      clearInterval(pollId);
+      window.removeEventListener('focus',onFocus);
+      document.removeEventListener('visibilitychange',onFocus);
+      supabase.removeChannel(channel);
+    };
+  },[periodId,load]);
 
   const visible=useMemo(()=>rows.filter(r=>{
     const q=norm(search);
