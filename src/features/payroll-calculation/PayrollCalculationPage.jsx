@@ -332,7 +332,13 @@ export default function PayrollCalculationPage({ page }) {
           : isContractOrGuest
             ? Math.max(0,fixed+teaching+additions-deductions)
             : Math.max(0,fixed+teaching+additions);
-        const taxable=excludeTax?0:Math.max(0,num(override!==''&&override!==null&&override!==undefined?override:calculatedTaxable));
+        // Hợp Đồng và Thỉnh Giảng dùng kết quả tính từ cấu phần lương kỳ hiện tại,
+        // không để taxable_income_override cũ ghi đè kết quả đã trừ Khoản Trừ.
+        // Cơ Hữu và các nhóm khác giữ nguyên cơ chế override hiện tại.
+        const taxableBase=isContractOrGuest
+          ? calculatedTaxable
+          : (override!==''&&override!==null&&override!==undefined?override:calculatedTaxable);
+        const taxable=excludeTax?0:Math.max(0,num(taxableBase));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
         const taxAmount=excludeTax?0:estimateTax({...commitment,...tax,has_commitment:tax.has_commitment??commitment.has_commitment??false,commitment_validated:tax.commitment_validated??false,employee_type:employeeType},taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
