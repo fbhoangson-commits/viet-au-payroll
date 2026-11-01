@@ -1,17 +1,17 @@
-# Điều chỉnh Thu nhập chịu thuế = Lương + Tiết dạy + (Khoản Cộng - Khoản Trừ)
+# FIX: Chỉ trừ Khoản Trừ cho Hợp Đồng và Thỉnh Giảng
 
-## Thay đổi
-- `src/features/payroll-calculation/PayrollCalculationPage.jsx`: với nhân sự không thuộc Cơ Hữu (Hợp Đồng/Thỉnh Giảng), thu nhập chịu thuế tự tính trừ `deductions` khỏi `fixed + teaching + additions`.
-- `src/features/insurance-tax-data/Page.jsx`: công thức `totalIncomeForTax` cũng trừ `income.deductions`, để màn hình Dữ liệu BHXH và Thuế và Tổng Hợp Lương hiển thị cùng căn cứ.
-- Công thức Cơ Hữu giữ nguyên nhánh tính giảm trừ cá nhân, người phụ thuộc, BHXH và các khoản liên quan; chỉ đưa Khoản Trừ vào cơ sở thu nhập trước khi áp dụng các giảm trừ như cách đang dùng tại Tổng Hợp Lương.
+## Phạm vi sửa
+- Cơ Hữu: giữ nguyên công thức cũ hoàn toàn. Biến `totalIncomeForTax` tiếp tục là Lương cố định + Tiết dạy + Khoản Cộng; nhánh giảm trừ Cơ Hữu không bị thay đổi.
+- Hợp Đồng và Thỉnh Giảng: Thu nhập chịu thuế tự tính = max(0, Lương cố định + Tiết dạy + Khoản Cộng - Khoản Trừ).
+- Tổng Hợp Lương đã áp dụng phép trừ trong nhánh `!isPermanent` בלבד.
+- Dữ Liệu Bảo Hiểm và Thuế: phép trừ `income.deductions` chỉ nằm trong nhánh `!isPermanent`; nhánh Cơ Hữu dùng nguyên `totalIncomeForTax` như trước.
+- Không thay đổi quy tắc cam kết thu nhập hợp lệ, loại trừ thuế hoặc giá trị điều chỉnh thủ công.
 
-## Công thức
-Thu nhập chịu thuế tự tính = max(0, Lương cố định + Thành tiền tiết dạy + Khoản cộng - Khoản trừ)
-- Hỗ trợ nhân sự và Thuế hỗ trợ vẫn được xử lý riêng như logic hiện tại.
-- `taxable_income_override` nếu có vẫn được ưu tiên như trước.
-- Cam kết thu nhập hợp lệ và cờ loại trừ thuế vẫn giữ nguyên.
+## Hai file
+- `src/features/payroll-calculation/PayrollCalculationPage.jsx`
+- `src/features/insurance-tax-data/Page.jsx`
 
 ## Kiểm tra
-- Hai file JSX đã qua TypeScript transpile, 0 diagnostics.
-- Chưa chạy npm build do môi trường source không có node_modules.
-- Không ghi dữ liệu Supabase, không chạy migration.
+- Đối chiếu diff: thay đổi chỉ nằm trong nhánh Hợp Đồng/Thỉnh Giảng ở cả hai module; công thức Cơ Hữu được giữ nguyên so với source trước bản vá.
+- JSX transpile sẽ được kiểm tra trước bàn giao.
+- Không chạy migration, không ghi dữ liệu Supabase.
