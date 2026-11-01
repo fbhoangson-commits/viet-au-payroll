@@ -312,7 +312,9 @@ export default function PayrollCalculationPage({ page }) {
         // The period-specific tax record is authoritative for this payroll period.
         // Employee Master is only a fallback: its classification may differ from
         // the employee type explicitly selected in Dữ Liệu Kỳ Lương.
-        const employeeType=firstText(tax.employee_type,tax.employee_classification,classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification);
+        // Use the period's displayed/effective classification first. A stale employee_type
+        // in the tax record must not override the period classification (e.g. Hợp Đồng).
+        const employeeType=firstText(classification,tax.employee_type,tax.employee_classification,master.employee_type,master.employee_classification,s.employee_type,s.employee_classification);
         const gross=fixed+teaching+additions+employeeSupport;
         const dependentCount=dependentCountFor(id,code,master,s);
         const supportAmount=num(tax.support_amount ?? supportFor(id,code));
@@ -320,8 +322,9 @@ export default function PayrollCalculationPage({ page }) {
         const reliefDependent=num(tax.dependent_relief_amount ?? defaultTaxConfig.dependent_relief_amount ?? 6200000);
         const override=tax.taxable_income_override;
         const employeeTypeKey=norm(`${employeeType} ${classification}`).replace(/[^a-z0-9]/g,'');
-        const isPermanent=norm(employeeType).includes('co huu');
         const isContractOrGuest=employeeTypeKey.includes('hopdong')||employeeTypeKey.includes('contract')||employeeTypeKey.includes('thinhgiang')||employeeTypeKey.includes('guestlecturer');
+        // Contract/guest classification takes precedence if legacy sources conflict.
+        const isPermanent=!isContractOrGuest && norm(employeeType).includes('co huu');
         // Keep the existing Cơ Hữu formula unchanged. Hợp Đồng and Thỉnh Giảng
         // use fixed salary + teaching pay + additions - deductions.
         // A manual override remains the only persisted taxable-income value that supersedes the source calculation.
