@@ -12,6 +12,8 @@ function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [systemRole, setSystemRole] = useState('');
+  const [roleReady, setRoleReady] = useState(false);
   const resolvePath = (path) => { const slug = String(path || '/').replace(/^\/+|\/+$/g, '') || 'dashboard'; return allItems.some(item => item.slug === slug) ? slug : 'dashboard'; };
   const [active, setActive] = useState(() => resolvePath(window.location.pathname));
   const [expanded, setExpanded] = useState(['TỔNG QUAN']);
@@ -31,9 +33,40 @@ function App() {
     });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
+  React.useEffect(() => {
+    let alive = true;
+    const resolveRole = async () => {
+      if (!session?.user?.id || !supabase) { setSystemRole(''); setRoleReady(true); return; }
+      setRoleReady(false);
+      try {
+        const { data: isAdmin, error: adminError } = await supabase.rpc('system_is_admin');
+        if (adminError) throw adminError;
+        if (isAdmin === true) { if (alive) setSystemRole('SUPER_ADMIN'); return; }
+        const { data: isAccountant, error: accountantError } = await supabase.rpc('system_has_role', { p_role: 'PAYROLL_ACCOUNTANT' });
+        if (accountantError) throw accountantError;
+        if (alive) setSystemRole(isAccountant === true ? 'PAYROLL_ACCOUNTANT' : 'NO_SYSTEM_ROLE');
+      } catch (error) {
+        console.error('Không xác định được vai trò hệ thống:', error);
+        if (alive) setSystemRole('ROLE_CHECK_FAILED');
+      } finally { if (alive) setRoleReady(true); }
+    };
+    resolveRole();
+    return () => { alive = false; };
+  }, [session?.user?.id]);
   const current = allItems.find(item => item.slug === active) || allItems[0];
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
-  const filtered = useMemo(() => NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [query]);
+  const visibleGroups = useMemo(() => NAV_GROUPS.map(group => ({ ...group, items: group.title === 'QUẢN LÝ HỆ THỐNG' && systemRole === 'PAYROLL_ACCOUNTANT' ? group.items.filter(item => item.slug === 'activity-log') : group.items })).filter(group => group.items.length), [systemRole]);
+  const filtered = useMemo(() => visibleGroups.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [visibleGroups, query]);
+  React.useEffect(() => {
+    if (!roleReady || systemRole === 'SUPER_ADMIN') return;
+    const systemItems = NAV_GROUPS.find(group => group.title === 'QUẢN LÝ HỆ THỐNG')?.items || [];
+    const allowed = systemRole === 'PAYROLL_ACCOUNTANT' ? ['activity-log'] : [];
+    if (systemItems.some(item => item.slug === active) && !allowed.includes(active)) {
+      const destination = systemRole === 'PAYROLL_ACCOUNTANT' ? 'activity-log' : 'dashboard';
+      setActive(destination);
+      window.history.replaceState({ slug: destination }, '', `/${destination}`);
+    }
+  }, [roleReady, systemRole, active]);
   const select = (item, group) => { setActive(item.slug); setExpanded([group.title]); setMobileOpen(false); if (window.location.pathname !== `/${item.slug}`) window.history.pushState({ slug: item.slug }, '', `/${item.slug}`); };
   React.useEffect(() => {
     const syncPath = () => { const slug = resolvePath(window.location.pathname); setActive(slug); const item = allItems.find(x => x.slug === slug); if (item) setExpanded([item.group]); };
@@ -43,7 +76,7 @@ function App() {
     syncPath();
     return () => window.removeEventListener('popstate', syncPath);
   }, []);
-  if (!authReady) return <div className="auth-loading"><div className="auth-spinner"/><span>Đang kiểm tra phiên đăng nhập…</span></div>;
+  if (!authReady || (session && !roleReady)) return <div className="auth-loading"><div className="auth-spinner"/><span>Đang kiểm tra phiên đăng nhập và quyền truy cập…</span></div>;
   if (!isSupabaseConfigured || !session) return <Login onLogin={setSession} />;
   return <div className="app-shell">
     {mobileOpen && <button className="mobile-scrim" aria-label="Đóng menu" onClick={() => setMobileOpen(false)} />}
