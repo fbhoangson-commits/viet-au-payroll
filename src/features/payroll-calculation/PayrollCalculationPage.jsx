@@ -249,7 +249,9 @@ export default function PayrollCalculationPage({ page }) {
       const supportFor=(id,code)=>supportRows.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && (!r.period_id || rowPeriodId(r)===selectedId) && !['CANCELLED','INACTIVE'].includes(String(r.status||'').toUpperCase())).reduce((sum,r)=>sum+num(r.amount??r.support_amount??Object.values(r.amounts||{}).reduce((a,v)=>a+num(v),0)),0);
       const output=snapshots.map(s=>{
         const id=employeeId(s), code=clean(s.employee_code||s.employee_code_snapshot), master=masterById.get(id)||{};
-        const rateRows=valuesByEmployee.get(id)||[];
+        // Dòng Hỗ trợ riêng được đánh dấu ở snapshot; không kế thừa cấu phần lương từ Employee Master.
+        const supportOnly=s.support_only===true;
+        const rateRows=supportOnly?[]:(valuesByEmployee.get(id)||[]);
         let fixed=0,rateCount=0;
         const fixedParts=Object.fromEntries(fixedColumns.map(c=>[`fixedCol_${c.id}`,0]));
         for(const rv of rateRows){
@@ -261,7 +263,7 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
+        const lessons=supportOnly?[]:periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
@@ -302,7 +304,7 @@ export default function PayrollCalculationPage({ page }) {
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
-        const employeeAdjustments=periodAdjustments.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && appliesAdjustment(r));
+        const employeeAdjustments=supportOnly?[]:periodAdjustments.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && appliesAdjustment(r));
         const addRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='ADD');
         const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
         const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
@@ -315,16 +317,16 @@ export default function PayrollCalculationPage({ page }) {
         const hasMasterProfile=Boolean(master.id);
         const insurance=insuranceByEmployee.get(id)||insuranceByCode.get(code)||{};
         const insuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
-        const excludeInsurance=s.exclude_insurance===true;
-        const excludeTax=s.exclude_tax===true;
+        const excludeInsurance=supportOnly||s.exclude_insurance===true;
+        const excludeTax=supportOnly||s.exclude_tax===true;
         const insuranceEmployee=excludeInsurance?0:num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? ((tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*insuranceRate/100 : 0));
         const employerInsurance=excludeInsurance?0:num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
-        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
+        const unionEmployee=supportOnly?0:num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         // Phân loại đã chốt trong snapshot nhân sự của kỳ lương là nguồn ưu tiên.
         // Sau đó mới dùng dữ liệu thuế kỳ lương; Employee Master chỉ là nguồn dự phòng.
         // Tránh lấy nhầm phân loại hồ sơ gốc để chọn sai nhánh tính thuế của kỳ hiện tại.
-        const classification=classificationOf(s,tax,master);
+        const classification=supportOnly?'Hỗ trợ riêng':classificationOf(s,tax,master);
         const employeeType=firstText(
           classification,
           s.employee_type,s.employee_classification,
@@ -372,12 +374,16 @@ export default function PayrollCalculationPage({ page }) {
         },taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
         const status=[];
-        if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
-        if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
-        if(missingRates) status.push('Thiếu đơn giá tiết dạy');
-        if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
-        if(!classification) status.push('Chưa cập nhật phân loại');
-        if(excludeInsurance||excludeTax) status.push('Nghỉ/tạm nghỉ chế độ – đã loại BHXH/thuế theo thiết lập kỳ');
+        if(!supportOnly){
+          if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
+          if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
+          if(missingRates) status.push('Thiếu đơn giá tiết dạy');
+          if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
+          if(!classification) status.push('Chưa cập nhật phân loại');
+          if(excludeInsurance||excludeTax) status.push('Nghỉ/tạm nghỉ chế độ – đã loại BHXH/thuế theo thiết lập kỳ');
+        } else {
+          status.push('Chỉ hưởng khoản hỗ trợ riêng');
+        }
         const fixedComponentCount=rateCount;
         const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
         const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
