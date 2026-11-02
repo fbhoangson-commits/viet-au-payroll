@@ -4,7 +4,6 @@ export const NAV_GROUPS = [
   ] },
   { title: "NHÂN SỰ", items: [
     { label: "Hồ sơ nhân sự", slug: "employee-master", icon: "users" },
-    { label: "Tài khoản ngân hàng", slug: "employee-bank", icon: "landmark" },
     { label: "Hợp đồng và Quyết định", slug: "contracts", icon: "file-text" },
     { label: "Lịch sử nhân sự", slug: "employee-history", icon: "history" },
   ] },
@@ -35,6 +34,7 @@ export const NAV_GROUPS = [
   ] },
   { title: "DUYỆT LƯƠNG - BÁO CÁO", items: [
     { label: "Hồ sơ trình duyệt", slug: "payroll-approvals", icon: "clipboard-check" },
+    { label: "Quản lý chi trả lương", slug: "payroll-disbursements", icon: "wallet" },
     { label: "Báo cáo Dashboard", slug: "reports-dashboard", icon: "chart-no-axes-combined" },
     { label: "Báo cáo quỹ lương", slug: "salary-fund-report", icon: "chart-column" },
     { label: "Báo cáo BHXH & thuế", slug: "insurance-tax-report", icon: "file-chart-column" },
