@@ -15,7 +15,7 @@ const num = value => {
   return Number.isFinite(n) ? n : 0;
 };
 const clean = v => String(v ?? '').trim();
-const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLocaleLowerCase('vi');
+const norm = v => clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLocaleLowerCase('vi');
 const codeOf = e => clean(e?.employee_code || e?.employee_code_snapshot || e?.code || '');
 const nameOf = e => clean(e?.employee_name_snapshot || e?.employee_name || e?.full_name || e?.name || codeOf(e) || 'Chưa có tên');
 const periodTitle = p => clean(p?.name || p?.period_code || p?.code || `Kỳ ${p?.period_year || ''}-${String(p?.period_month || '').padStart(2,'0')}`);
@@ -183,26 +183,9 @@ export default function PayrollCalculationPage({ page }) {
       const snapshots=snapshotsRaw.length ? snapshotsRaw : snapshotB.filter(r=>rowPeriodId(r)===selectedId);
       const masterById=new Map(employees.map(e=>[clean(e.id),e]));
       const selectedPeriod=fixedPeriods.find(p=>p.id===selectedId)||{};
-      // Hỗ trợ nhân sự được liên kết theo employee_id và lưu mã nhân viên snapshot.
-      // Đối chiếu cả hai khóa để không bỏ sót khoản hỗ trợ nếu ID ở snapshot kỳ lương
-      // khác ID trong liên kết, trong khi mã nhân viên vẫn khớp.
-      const selectedSupportLinks=(supportPeriodLinks||[]).filter(r=>rowPeriodId(r)===selectedId);
+      const selectedSupportLinks=(supportPeriodLinks||[]).filter(r=>rowPeriodId(r)===selectedId&&r.employee_id);
       const supportByEmployee=new Map();
-      const addSupportIndex=(key,r)=>{
-        if(!key)return;
-        if(!supportByEmployee.has(key))supportByEmployee.set(key,{amount:0,tax:0,count:0,items:[]});
-        const v=supportByEmployee.get(key);
-        v.amount+=num(r.amount_snapshot);
-        v.tax+=num(r.tax_amount_snapshot);
-        v.count++;
-        v.items.push(r);
-      };
-      for(const r of selectedSupportLinks){
-        const idKey=employeeId(r);
-        const codeKey=clean(r.employee_code_snapshot||r.employee_code).toLocaleUpperCase('vi');
-        if(idKey)addSupportIndex(`id:${idKey}`,r);
-        if(codeKey)addSupportIndex(`code:${codeKey}`,r);
-      }
+      for(const r of selectedSupportLinks){const k=employeeId(r);if(!supportByEmployee.has(k))supportByEmployee.set(k,{amount:0,tax:0,count:0,items:[]});const v=supportByEmployee.get(k);v.amount+=num(r.amount_snapshot);v.tax+=num(r.tax_amount_snapshot);v.count++;v.items.push(r);}
       const selectedRateVersion=(rateVersionRows||[]).find(v=>v.id===selectedPeriod.salary_rate_version_id);
       const effectiveGroups=Array.isArray(selectedRateVersion?.groups_snapshot)&&selectedRateVersion.groups_snapshot.length?selectedRateVersion.groups_snapshot:groups;
       const effectiveColumns=Array.isArray(selectedRateVersion?.columns_snapshot)&&selectedRateVersion.columns_snapshot.length?selectedRateVersion.columns_snapshot:columns;
@@ -266,9 +249,7 @@ export default function PayrollCalculationPage({ page }) {
       const supportFor=(id,code)=>supportRows.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && (!r.period_id || rowPeriodId(r)===selectedId) && !['CANCELLED','INACTIVE'].includes(String(r.status||'').toUpperCase())).reduce((sum,r)=>sum+num(r.amount??r.support_amount??Object.values(r.amounts||{}).reduce((a,v)=>a+num(v),0)),0);
       const output=snapshots.map(s=>{
         const id=employeeId(s), code=clean(s.employee_code||s.employee_code_snapshot), master=masterById.get(id)||{};
-        // Nhân sự được thêm riêng để nhận hỗ trợ không tham gia các cấu phần lương thông thường.
-        const isSupportOnly=s.support_only===true;
-        const rateRows=isSupportOnly?[]:(valuesByEmployee.get(id)||[]);
+        const rateRows=valuesByEmployee.get(id)||[];
         let fixed=0,rateCount=0;
         const fixedParts=Object.fromEntries(fixedColumns.map(c=>[`fixedCol_${c.id}`,0]));
         for(const rv of rateRows){
@@ -280,7 +261,7 @@ export default function PayrollCalculationPage({ page }) {
             if(vals[c.id]!==undefined && vals[c.id]!==null && vals[c.id]!==''){fixedParts[`fixedCol_${c.id}`]=num(vals[c.id]);fixed+=num(vals[c.id]);rateCount++;}
           }
         }
-        const lessons=isSupportOnly?[]:periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
+        const lessons=periodTeaching.filter(r=>employeeId(r)===id || codeOf(r).toLocaleUpperCase('vi')===code.toLocaleUpperCase('vi'));
         let teaching=0, lessonCount=0, missingRates=0;
         const lessonParts=Object.fromEntries(teachingColumns.map(c=>[`lesson_${c.id}`,0]));
         for(const rec of lessons){
@@ -321,14 +302,12 @@ export default function PayrollCalculationPage({ page }) {
           if(rate===undefined||rate===null||rate==='') missingRates++;
           else teaching+=num(rec.lesson_count)*num(rate);
         }
-        const employeeAdjustments=isSupportOnly?[]:periodAdjustments.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && appliesAdjustment(r));
+        const employeeAdjustments=periodAdjustments.filter(r=>(employeeId(r)===id || clean(r.employee_code||r.employee_code_snapshot)===code) && appliesAdjustment(r));
         const addRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='ADD');
         const deductRows=employeeAdjustments.filter(r=>String(r.kind||'').toUpperCase()==='DEDUCT');
         const additions=addRows.reduce((sum,r)=>sum+num(r.amount),0);
         const deductions=deductRows.reduce((sum,r)=>sum+num(r.amount),0);
-        const employeeSupportData=supportByEmployee.get(`id:${id}`)
-          ||supportByEmployee.get(`code:${code.toLocaleUpperCase('vi')}`)
-          ||{amount:0,tax:0,count:0,items:[]};
+        const employeeSupportData=supportByEmployee.get(id)||{amount:0,tax:0,count:0,items:[]};
         const employeeSupport=employeeSupportData.amount;
         const supportTax=employeeSupportData.tax;
         const tax=taxByEmployee.get(`id:${id}`)||taxByEmployee.get(`code:${code}`)||{};
@@ -336,12 +315,12 @@ export default function PayrollCalculationPage({ page }) {
         const hasMasterProfile=Boolean(master.id);
         const insurance=insuranceByEmployee.get(id)||insuranceByCode.get(code)||{};
         const insuranceRate=num(tax.employee_social_rate ?? insurance.employee_social_rate ?? 8)+num(tax.employee_health_rate ?? insurance.employee_health_rate ?? 1.5)+num(tax.employee_unemployment_rate ?? insurance.employee_unemployment_rate ?? 1);
-        const excludeInsurance=isSupportOnly||s.exclude_insurance===true;
-        const excludeTax=isSupportOnly||s.exclude_tax===true;
+        const excludeInsurance=s.exclude_insurance===true;
+        const excludeTax=s.exclude_tax===true;
         const insuranceEmployee=excludeInsurance?0:num(tax.employee_insurance_amount ?? tax.insurance_employee_amount ?? ((tax.participates_insurance ?? insurance.participates_insurance)===true ? num(tax.insurance_salary_base ?? insurance.insurance_salary_base)*insuranceRate/100 : 0));
         const employerInsurance=excludeInsurance?0:num(tax.employer_insurance_amount ?? tax.insurance_employer_amount ?? 0);
         const union=unionByEmployee.get(id)||unionByCode.get(code)||{};
-        const unionEmployee=isSupportOnly?0:num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
+        const unionEmployee=num(tax.union_employee_amount ?? tax.union_fee_employee_amount ?? union.employee_contribution ?? union.union_employee_amount ?? union.employee_fee ?? 0);
         // Phân loại đã chốt trong snapshot nhân sự của kỳ lương là nguồn ưu tiên.
         // Sau đó mới dùng dữ liệu thuế kỳ lương; Employee Master chỉ là nguồn dự phòng.
         // Tránh lấy nhầm phân loại hồ sơ gốc để chọn sai nhánh tính thuế của kỳ hiện tại.
@@ -378,12 +357,12 @@ export default function PayrollCalculationPage({ page }) {
         const taxableBase=isContractOrGuest
           ? calculatedTaxable
           : (override!==''&&override!==null&&override!==undefined?override:calculatedTaxable);
-        const taxable=(excludeTax||isSupportOnly)?0:Math.max(0,num(taxableBase));
+        const taxable=excludeTax?0:Math.max(0,num(taxableBase));
         const commitment=commitments.find(c=>(employeeId(c)===id||clean(c.employee_code||c.employee_code_snapshot)===code)&&(!c.period_id||rowPeriodId(c)===selectedId)&&c.has_commitment!==false) || {};
         // Hợp Đồng / Thỉnh Giảng phải tính thuế trên taxable đã tính từ cấu phần
         // lương kỳ hiện tại (đã trừ Khoản Trừ), không dùng taxable_income_override
         // cũ trong bản ghi thuế để ghi đè lại căn cứ tính thuế.
-        const taxAmount=(excludeTax||isSupportOnly)?0:estimateTax({
+        const taxAmount=excludeTax?0:estimateTax({
           ...commitment,
           ...tax,
           has_commitment:tax.has_commitment??commitment.has_commitment??false,
@@ -393,18 +372,16 @@ export default function PayrollCalculationPage({ page }) {
         },taxable);
         const net=gross-deductions-insuranceEmployee-unionEmployee-taxAmount-supportTax;
         const status=[];
-        if(!isSupportOnly&&!rateRows.length) status.push('Chưa có dữ liệu định mức');
+        if(!rateRows.length) status.push('Chưa có dữ liệu định mức');
         if(lessons.some(r=>!columnsById.get(clean(r.salary_rate_column_id)))) status.push('Có tiết chưa khớp cấu hình');
         if(missingRates) status.push('Thiếu đơn giá tiết dạy');
-        if(!isSupportOnly&&!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
-        if(!isSupportOnly&&!classification) status.push('Chưa cập nhật phân loại');
-        if(isSupportOnly) status.push('Chỉ hưởng hỗ trợ riêng');
-        else if(excludeInsurance||excludeTax) status.push('Nghỉ/tạm nghỉ chế độ – đã loại BHXH/thuế theo thiết lập kỳ');
+        if(!hasTaxData) status.push('Chưa có dữ liệu BHXH/thuế kỳ');
+        if(!classification) status.push('Chưa cập nhật phân loại');
+        if(excludeInsurance||excludeTax) status.push('Nghỉ/tạm nghỉ chế độ – đã loại BHXH/thuế theo thiết lập kỳ');
         const fixedComponentCount=rateCount;
         const teachingStatus=lessons.length===0?'Chưa ghi nhận tiết dạy':missingRates?'Thiếu đơn giá tiết dạy':'Đã ghi nhận tiết dạy';
-        const taxMethod=isSupportOnly?'Hỗ trợ riêng':(tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification));
-        const displayClassification=isSupportOnly?'Hỗ trợ riêng':classification;
-        return {id,code,name:nameOf(s)||nameOf(master),classification:displayClassification,isSupportOnly,excludeInsurance,excludeTax,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,employeeSupport,supportTax,supportCount:employeeSupportData.count,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:isSupportOnly?false:(tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false),dependents:isSupportOnly?0:(tax.dependent_count??dependentCount),support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
+        const taxMethod=tax.method||tax.tax_method||tax.calculation_method||taxMethodFor(classification);
+        return {id,code,name:nameOf(s)||nameOf(master),classification,excludeInsurance,excludeTax,columnLabels:dynamicLabels,hasTaxData,hasMasterProfile,hasRateData:rateRows.length>0,hasInsuranceProfile:Boolean(insuranceByEmployee.get(id)),hasUnionProfile:Boolean(unionByEmployee.get(id)),adjustmentCount:employeeAdjustments.length,department:s.department||s.department_snapshot||master.department||'—',position:s.position||s.position_snapshot||master.position||master.job_title||'—',fixed,...fixedParts,...lessonParts,teaching,lessonCount,rateCount,fixedComponentCount,additions,employeeSupport,supportTax,supportCount:employeeSupportData.count,deductions,additionCount:addRows.length,deductionCount:deductRows.length,difference:additions-deductions,insuranceEmployee,employerInsurance,unionEmployee,tax,taxable,taxAmount,taxMethod,gross,net,participates:tax.participates_insurance??insurance.participates_insurance??insurance.social_insurance??false,dependents:tax.dependent_count??dependentCount,support:supportFor(id,code),status:status.length?status.join(' · '):'Đủ dữ liệu nguồn',teachingStatus,hasIssue:status.length>0};
       }).sort((a,b)=>a.code.localeCompare(b.code,'vi',{numeric:true}));
       setRows(output);setWarnings(notes);setDataLoaded(true);
     } catch(e) {setError(errorText(e));setRows([]);setWarnings(notes);setDataLoaded(false);}
