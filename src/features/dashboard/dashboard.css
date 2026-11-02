@@ -64,3 +64,45 @@
 @media(max-width:1150px){.overview-grid-main,.overview-grid-finance,.overview-grid-bottom{grid-template-columns:1fr 1fr}.overview-bar-row{grid-template-columns:95px minmax(30px,1fr) 95px}}
 @media(max-width:850px){.overview-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-grid-main,.overview-grid-finance,.overview-grid-bottom{grid-template-columns:1fr}.overview-toolbar{justify-content:stretch}.overview-toolbar>div{width:100%}.overview-toolbar label{flex:1}.overview-toolbar select{min-width:0;width:100%}}
 @media(max-width:560px){.dashboard-top-row{flex-direction:column}.todo-widget{width:100%}.overview-kpis{gap:7px}.overview-kpi{padding:11px;min-height:100px}.overview-kpi>strong{font-size:20px}.overview-period-meta{flex-direction:column;gap:7px}.overview-stage-status{display:none}.overview-bar-row{grid-template-columns:88px minmax(20px,1fr) 82px;gap:5px}.overview-finance-kpis strong{font-size:13px}.overview-panel{padding:12px}}
+
+/* Dashboard 3:1 workspace layout with a full-height personal notes rail. */
+@media (min-width: 1101px) {
+  .dashboard-page { padding-right: clamp(285px, calc((100vw - 300px) * .25 + 18px), 390px); }
+  .dashboard-top-row { display: contents; }
+  .dashboard-overview-heading { width: 100%; }
+  .todo-widget {
+    position: fixed;
+    z-index: 30;
+    top: 112px;
+    right: 18px;
+    bottom: 18px;
+    width: clamp(267px, calc((100vw - 300px) * .25), 360px);
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 15px;
+  }
+  .todo-widget-list { gap: 7px; }
+  .todo-widget-item { border: 1px solid rgba(31,65,88,.10); border-radius: 8px; padding: 9px 7px; }
+  .todo-widget-item.note-blue { background: #f1f7ff; }
+  .todo-widget-item.note-yellow { background: #fff9df; }
+  .todo-widget-item.note-green { background: #eff9f1; }
+  .todo-widget-item.note-pink { background: #fff1f5; }
+  .todo-widget-item.note-purple { background: #f6f0ff; }
+  .todo-widget-item.note-gray { background: #f2f4f6; }
+  .todo-widget-item.is-overdue { border-color: #e7b5b0; }
+  .todo-widget-pin { width: 25px; height: 25px; display:grid; place-items:center; flex:none; border:0; border-radius:6px; background:transparent; color:#72869a; }
+  .todo-widget-pin:hover { background:rgba(255,255,255,.75); color:#176f78; }
+  .todo-widget-task { min-width:0; flex:1; }
+  .todo-widget-task strong { overflow-wrap:anywhere; }
+  .todo-widget-footer { position:sticky; bottom:-15px; background:#fff; padding:10px 0 2px; }
+  .todo-modal { z-index: 90; }
+}
+.todo-form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.todo-widget-pin { display:grid; place-items:center; flex:none; border:0; background:transparent; color:#7c8fa0; cursor:pointer; }
+.todo-widget-pin:hover { color:#167d79; }
+@media (max-width: 1100px) {
+  .dashboard-page { padding-right:0; }
+  .dashboard-top-row { display:flex; }
+  .todo-widget { position:static; width:100%; max-height:none; overflow:visible; }
+}

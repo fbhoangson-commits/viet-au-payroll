@@ -3,7 +3,7 @@ import {
   AlertCircle, CalendarDays, Check, CheckCircle2, Circle, ClipboardList,
   Clock3, Edit3, ListTodo, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, X,
   Users, UserCheck, UserX, Landmark, Wallet, TrendingUp, BarChart3,
-  ClipboardCheck, FileCheck2, AlertTriangle, ArrowUpRight, CalendarRange,
+  ClipboardCheck, FileCheck2, AlertTriangle, ArrowUpRight, CalendarRange, Pin, PinOff,
 } from 'lucide-react';
 import { supabase } from '../../shared/supabase.js';
 import './dashboard.css';
@@ -19,7 +19,8 @@ const FILTERS = [
   { value: 'done', label: 'Đã hoàn thành' },
   { value: 'overdue', label: 'Quá hạn' },
 ];
-const EMPTY_FORM = { title: '', description: '', due_date: '', priority: 'normal' };
+const EMPTY_FORM = { title: '', description: '', due_date: '', priority: 'normal', color: 'blue' };
+const NOTE_COLORS = [{value:'blue',label:'Xanh dương'},{value:'yellow',label:'Vàng'},{value:'green',label:'Xanh lá'},{value:'pink',label:'Hồng'},{value:'purple',label:'Tím'},{value:'gray',label:'Xám'}];
 const todayLocal = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -135,8 +136,8 @@ export default function Page() {
     setLoading(true); setError('');
     const { data, error: queryError } = await supabase
       .from('payroll_user_tasks')
-      .select('id,user_id,title,description,due_date,priority,status,created_at,updated_at,completed_at')
-      .order('created_at', { ascending: false });
+      .select('id,user_id,title,description,due_date,priority,status,color,is_pinned,created_at,updated_at,completed_at')
+      .order('is_pinned', { ascending: false }).order('created_at', { ascending: false });
     if (queryError) setError(queryError.message.includes('payroll_user_tasks')
       ? 'Chưa tạo bảng payroll_user_tasks trên Supabase. Vui lòng chạy file SQL migration đi kèm bản vá.'
       : `Không tải được danh sách công việc: ${queryError.message}`);
@@ -162,6 +163,8 @@ export default function Page() {
     });
     const priorityRank = { high: 0, normal: 1, low: 2 };
     rows = [...rows].sort((a, b) => {
+      const pinnedOrder = Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned));
+      if (pinnedOrder) return pinnedOrder;
       if (sort === 'priority') return (priorityRank[a.priority] ?? 1) - (priorityRank[b.priority] ?? 1) || String(a.due_date || '9999').localeCompare(String(b.due_date || '9999'));
       if (sort === 'due_date') return String(a.due_date || '9999').localeCompare(String(b.due_date || '9999'));
       return new Date(b.created_at || 0) - new Date(a.created_at || 0);
@@ -172,7 +175,7 @@ export default function Page() {
   const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setError(''); setModalOpen(true); };
   const openEdit = task => {
     setEditing(task);
-    setForm({ title: task.title || '', description: task.description || '', due_date: task.due_date || '', priority: task.priority || 'normal' });
+    setForm({ title: task.title || '', description: task.description || '', due_date: task.due_date || '', priority: task.priority || 'normal', color: task.color || 'blue' });
     setError(''); setModalOpen(true);
   };
 
@@ -186,6 +189,7 @@ export default function Page() {
       description: form.description.trim() || null,
       due_date: form.due_date || null,
       priority: form.priority,
+      color: form.color || 'blue',
       updated_at: new Date().toISOString(),
     };
     const result = editing
@@ -210,6 +214,14 @@ export default function Page() {
     else setTasks(old => old.map(t => t.id === task.id ? data : t));
   };
 
+  const togglePinTask = async task => {
+    const { data, error: updateError } = await supabase.from('payroll_user_tasks')
+      .update({ is_pinned: !task.is_pinned, updated_at: new Date().toISOString() })
+      .eq('id', task.id).select().single();
+    if (updateError) setError(`Không cập nhật được ghim ghi chú: ${updateError.message}`);
+    else setTasks(old => old.map(t => t.id === task.id ? data : t));
+  };
+
   const deleteTask = async task => {
     if (!window.confirm(`Xóa công việc “${task.title}”? Thao tác này không thể hoàn tác.`)) return;
     setError(''); setNotice('');
@@ -218,7 +230,7 @@ export default function Page() {
     else { setTasks(old => old.filter(t => t.id !== task.id)); setNotice('Đã xóa công việc.'); }
   };
 
-  const previewTasks = tasks.filter(task => task.status !== 'completed').slice(0, 3);
+  const previewTasks = [...tasks.filter(task => task.status !== 'completed')].sort((a,b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)) || new Date(b.created_at || 0) - new Date(a.created_at || 0));
   const selectedPeriod = overview.periods.find(p => p.id === selectedPeriodId) || null;
   const periodMembership = selectedPeriod ? overview.periodEmployees.filter(r => r.period_id === selectedPeriod.id) : [];
   const snapshotMembership = selectedPeriod ? overview.snapshots.filter(r => r.period_id === selectedPeriod.id) : [];
@@ -293,10 +305,10 @@ export default function Page() {
         {notice && <div className="todo-widget-notice">{notice}</div>}
         {loading ? <div className="todo-widget-empty"><Loader2 size={14} className="dashboard-spin"/> Đang tải ghi chú…</div>
           : previewTasks.length === 0 ? <div className="todo-widget-empty">{tasks.length ? 'Không còn việc nào cần thực hiện.' : 'Chưa có ghi chú. Thêm việc cần nhớ tại đây.'}</div>
-          : <div className="todo-widget-list">{previewTasks.map(task => <div className={`todo-widget-item ${isOverdue(task) ? 'is-overdue' : ''}`} key={task.id}>
+          : <div className="todo-widget-list">{previewTasks.map(task => <div className={`todo-widget-item note-${task.color || 'blue'} ${isOverdue(task) ? 'is-overdue' : ''}`} key={task.id}>
             <button className="todo-widget-check" onClick={() => toggleTask(task)} title="Đánh dấu hoàn thành"><Circle size={15}/></button>
             <button className="todo-widget-task" onClick={() => openEdit(task)} title="Mở ghi chú"><strong>{task.title}</strong><span>{task.due_date ? `Hạn ${formatDate(task.due_date)}` : priorityLabel(task.priority)}{isOverdue(task) ? ' · Quá hạn' : ''}</span></button>
-            <button className="todo-widget-edit" onClick={() => openEdit(task)} title="Chỉnh sửa"><Edit3 size={13}/></button>
+            <button className="todo-widget-pin" onClick={() => togglePinTask(task)} title={task.is_pinned ? 'Bỏ ghim' : 'Ghim ghi chú'}>{task.is_pinned ? <Pin size={12}/> : <PinOff size={12}/>}</button><button className="todo-widget-edit" onClick={() => openEdit(task)} title="Chỉnh sửa"><Edit3 size={13}/></button>
           </div>)}</div>}
         <div className="todo-widget-footer"><button onClick={() => { setFilter('open'); setShowTaskManager(v => !v); }}>{showTaskManager ? 'Thu gọn' : 'Xem tất cả ghi chú'}</button><span>{counts.done} hoàn thành</span></div>
         {showTaskManager && <div className="todo-manager">
@@ -370,6 +382,6 @@ export default function Page() {
     </div>
     <div className="overview-footnote overview-data-note"><BarChart3 size={13}/> Dữ liệu tổng hợp trực tiếp từ Employee Master, Kỳ Lương, chấm công, chấm tiết và phiên bản lương đã lưu. Các chỉ số bị giới hạn theo quyền truy cập Supabase hiện tại.</div>
 
-    {modalOpen && <div className="todo-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget && !saving) setModalOpen(false); }}><section className="todo-modal" role="dialog" aria-modal="true" aria-labelledby="todo-modal-title"><header><div><h3 id="todo-modal-title">{editing ? 'Chỉnh sửa ghi chú' : 'Thêm ghi chú mới'}</h3><p>Lưu ghi chú vào danh sách cá nhân của bạn.</p></div><button onClick={() => setModalOpen(false)} disabled={saving} aria-label="Đóng"><X size={19}/></button></header><form onSubmit={saveTask}><label>Nội dung công việc <em>*</em><input autoFocus maxLength={180} required value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} placeholder="Nhập nội dung cần ghi nhớ"/></label><label>Ghi chú chi tiết<textarea rows={3} maxLength={2000} value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} placeholder="Thông tin hoặc ghi chú bổ sung (không bắt buộc)"/></label><div className="todo-form-grid"><label>Ngày hết hạn<input type="date" value={form.due_date} onChange={e => setForm(v => ({ ...v, due_date: e.target.value }))}/></label><label>Mức độ ưu tiên<select value={form.priority} onChange={e => setForm(v => ({ ...v, priority: e.target.value }))}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></label></div>{error && <div className="todo-alert todo-alert-error"><AlertCircle size={15}/>{error}</div>}<footer><button type="button" className="todo-secondary" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</button><button type="submit" className="todo-primary" disabled={saving}>{saving ? <Loader2 size={15} className="dashboard-spin"/> : <Check size={15}/>} {editing ? 'Lưu thay đổi' : 'Thêm ghi chú'}</button></footer></form></section></div>}
+    {modalOpen && <div className="todo-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget && !saving) setModalOpen(false); }}><section className="todo-modal" role="dialog" aria-modal="true" aria-labelledby="todo-modal-title"><header><div><h3 id="todo-modal-title">{editing ? 'Chỉnh sửa ghi chú' : 'Thêm ghi chú mới'}</h3><p>Lưu ghi chú vào danh sách cá nhân của bạn.</p></div><button onClick={() => setModalOpen(false)} disabled={saving} aria-label="Đóng"><X size={19}/></button></header><form onSubmit={saveTask}><label>Nội dung công việc <em>*</em><input autoFocus maxLength={180} required value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value }))} placeholder="Nhập nội dung cần ghi nhớ"/></label><label>Ghi chú chi tiết<textarea rows={3} maxLength={2000} value={form.description} onChange={e => setForm(v => ({ ...v, description: e.target.value }))} placeholder="Thông tin hoặc ghi chú bổ sung (không bắt buộc)"/></label><div className="todo-form-grid"><label>Ngày hết hạn<input type="date" value={form.due_date} onChange={e => setForm(v => ({ ...v, due_date: e.target.value }))}/></label><label>Mức độ ưu tiên<select value={form.priority} onChange={e => setForm(v => ({ ...v, priority: e.target.value }))}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></label><label>Màu ghi chú<select value={form.color} onChange={e => setForm(v => ({ ...v, color: e.target.value }))}>{NOTE_COLORS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label></div>{error && <div className="todo-alert todo-alert-error"><AlertCircle size={15}/>{error}</div>}<footer><button type="button" className="todo-secondary" onClick={() => setModalOpen(false)} disabled={saving}>Hủy</button><button type="submit" className="todo-primary" disabled={saving}>{saving ? <Loader2 size={15} className="dashboard-spin"/> : <Check size={15}/>} {editing ? 'Lưu thay đổi' : 'Thêm ghi chú'}</button></footer></form></section></div>}
   </section>;
 }
