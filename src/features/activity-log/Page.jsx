@@ -1,6 +1,18 @@
-import React from 'react';
-import FeaturePage from '../../shared/components/FeaturePage.jsx';
-
-export default function Page() {
-  return <FeaturePage title={"Nhật ký hoạt động"} description={"Theo dõi lịch sử thao tác trong hệ thống."} />;
+import React,{useCallback,useEffect,useState} from 'react';
+import {Activity,RefreshCw,Search,ShieldCheck,AlertCircle,Download} from 'lucide-react';
+import {supabase} from '../../shared/supabase.js';
+import './activity-log.css';
+export default function Page(){
+ const [rows,setRows]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[query,setQuery]=useState(''),[module,setModule]=useState('all');
+ const load=useCallback(async()=>{setLoading(true);setError('');try{const {data,error}=await supabase.from('system_activity_logs').select('*').order('created_at',{ascending:false}).limit(500);if(error)throw error;setRows(data||[]);}catch(e){setError(e.message||'Không tải được nhật ký.');}finally{setLoading(false);}},[]);
+ useEffect(()=>{load();},[load]);
+ const modules=[...new Set(rows.map(r=>r.module).filter(Boolean))];const filtered=rows.filter(r=>(module==='all'||r.module===module)&&`${r.actor_email||''} ${r.module||''} ${r.action||''} ${r.description||''} ${r.entity_id||''}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')));
+ const exportCsv=()=>{const esc=v=>'"'+String(v??'').replace(/"/g,'""')+'"';const csv=['Thời gian,Người thực hiện,Module,Hành động,Đối tượng,Mô tả',...filtered.map(r=>[r.created_at,r.actor_email,r.module,r.action,r.entity_type?`${r.entity_type}:${r.entity_id||''}`:'',r.description].map(esc).join(','))].join('\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Nhat-ky-hoat-dong.csv';a.click();URL.revokeObjectURL(url);};
+ return <section className="audit-page"><div className="audit-head"><div><div className="audit-eyebrow">GIÁM SÁT & TRUY VẾT</div><h2>Nhật ký hoạt động</h2><p>Lịch sử thao tác quản trị và các sự kiện được hệ thống ghi nhận.</p></div><button onClick={load} className="audit-btn" disabled={loading}><RefreshCw size={15}/> Làm mới</button></div>
+ <div className="audit-kpis"><article><Activity/><span>Bản ghi đang lưu</span><b>{rows.length}</b></article><article><ShieldCheck/><span>Người thực hiện</span><b>{new Set(rows.map(r=>r.actor_id).filter(Boolean)).size}</b></article><article><span className="audit-kpi-dot"/><span>Hiển thị tối đa</span><b>500 bản ghi</b></article></div>
+ {error&&<div className="audit-error"><AlertCircle size={16}/>{error}</div>}
+ <div className="audit-toolbar"><label><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Tìm người dùng, hành động, nội dung..."/></label><select value={module} onChange={e=>setModule(e.target.value)}><option value="all">Tất cả module</option>{modules.map(m=><option key={m}>{m}</option>)}</select><button className="audit-btn" onClick={exportCsv}><Download size={15}/> Xuất CSV</button></div>
+ <div className="audit-table-wrap"><table className="audit-table"><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Module</th><th>Hành động</th><th>Nội dung</th></tr></thead><tbody>{loading?<tr><td colSpan="5" className="audit-empty">Đang tải nhật ký…</td></tr>:filtered.length===0?<tr><td colSpan="5" className="audit-empty">Chưa có nhật ký hoạt động phù hợp. Nhật ký mới sẽ xuất hiện khi hệ thống ghi nhận thao tác.</td></tr>:filtered.map(r=><tr key={r.id}><td>{new Date(r.created_at).toLocaleString('vi-VN')}</td><td>{r.actor_email||'Hệ thống'}</td><td><span className="audit-module">{r.module}</span></td><td><b>{r.action}</b></td><td>{r.description||`${r.entity_type||''} ${r.entity_id||''}`}</td></tr>)}</tbody></table></div>
+ <div className="audit-note"><ShieldCheck size={16}/> Nhật ký được lưu append-only ở cấp ứng dụng. Giai đoạn này ghi nhận sự kiện quản trị tài khoản; các module nghiệp vụ sẽ được tích hợp ghi log theo từng đợt, không tự tạo lịch sử giả.</div>
+ </section>;
 }
