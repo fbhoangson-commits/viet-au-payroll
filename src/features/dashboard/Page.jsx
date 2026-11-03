@@ -307,7 +307,11 @@ export default function Page() {
           : previewTasks.length === 0 ? <div className="todo-widget-empty">{tasks.length ? 'Không còn việc nào cần thực hiện.' : 'Chưa có ghi chú. Thêm việc cần nhớ tại đây.'}</div>
           : <div className="todo-widget-list">{previewTasks.map(task => <div className={`todo-widget-item note-${task.color || 'blue'} ${isOverdue(task) ? 'is-overdue' : ''}`} key={task.id}>
             <button className="todo-widget-check" onClick={() => toggleTask(task)} title="Đánh dấu hoàn thành"><Circle size={15}/></button>
-            <button className="todo-widget-task" onClick={() => openEdit(task)} title="Mở ghi chú"><strong>{task.title}</strong><span>{task.due_date ? `Hạn ${formatDate(task.due_date)}` : priorityLabel(task.priority)}{isOverdue(task) ? ' · Quá hạn' : ''}</span></button>
+            <button className="todo-widget-task" onClick={() => openEdit(task)} title="Mở ghi chú">
+              <strong>{task.title}</strong>
+              {task.description ? <span className="todo-widget-description">{task.description}</span> : <span className="todo-widget-description is-empty">Chưa có nội dung chi tiết</span>}
+              <span className="todo-widget-meta">{task.due_date ? `Hạn ${formatDate(task.due_date)}` : priorityLabel(task.priority)}{isOverdue(task) ? ' · Quá hạn' : ''}</span>
+            </button>
             <button className="todo-widget-pin" onClick={() => togglePinTask(task)} title={task.is_pinned ? 'Bỏ ghim' : 'Ghim ghi chú'}>{task.is_pinned ? <Pin size={12}/> : <PinOff size={12}/>}</button><button className="todo-widget-edit" onClick={() => openEdit(task)} title="Chỉnh sửa"><Edit3 size={13}/></button>
           </div>)}</div>}
         <div className="todo-widget-footer"><button onClick={() => { setFilter('open'); setShowTaskManager(v => !v); }}>{showTaskManager ? 'Thu gọn' : 'Xem tất cả ghi chú'}</button><span>{counts.done} hoàn thành</span></div>

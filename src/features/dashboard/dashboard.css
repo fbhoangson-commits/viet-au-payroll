@@ -106,3 +106,75 @@
   .dashboard-top-row { display:flex; }
   .todo-widget { position:static; width:100%; max-height:none; overflow:visible; }
 }
+
+
+/* GHI CHU CUA TOI – title/detail layout, auto height and accessible color contrast */
+.todo-widget-item {
+  align-items: flex-start;
+  min-height: 0;
+  height: auto;
+  padding: 9px 8px;
+  gap: 6px;
+}
+.todo-widget-task {
+  align-self: stretch;
+  min-width: 0;
+  height: auto;
+  white-space: normal;
+  overflow: visible;
+  gap: 4px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.todo-widget-task strong {
+  display: block;
+  width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 800;
+}
+.todo-widget-task .todo-widget-description {
+  display: block;
+  width: 100%;
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 9px;
+  line-height: 1.55;
+  font-weight: 500;
+  color: inherit;
+}
+.todo-widget-task .todo-widget-description.is-empty {
+  opacity: .62;
+  font-style: italic;
+}
+.todo-widget-task .todo-widget-meta {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 8px;
+  line-height: 1.4;
+  opacity: .78;
+  color: inherit;
+}
+.todo-widget-item.note-pink { background: #fff0f3; border-color: #f2c8d0; color: #84283b; }
+.todo-widget-item.note-blue { background: #edf5ff; border-color: #c9ddf5; color: #174a78; }
+.todo-widget-item.note-yellow { background: #fff8dc; border-color: #eadb9c; color: #594719; }
+.todo-widget-item.note-green { background: #edf8ef; border-color: #c9e5cf; color: #245d37; }
+.todo-widget-item.note-purple { background: #f5efff; border-color: #ddcef5; color: #593a80; }
+.todo-widget-item.note-gray { background: #f1f3f5; border-color: #d8dee4; color: #46515c; }
+.todo-widget-item .todo-widget-check,
+.todo-widget-item .todo-widget-pin,
+.todo-widget-item .todo-widget-edit { color: inherit; opacity: .76; }
+.todo-widget-item .todo-widget-check:hover,
+.todo-widget-item .todo-widget-pin:hover,
+.todo-widget-item .todo-widget-edit:hover { color: inherit; background: rgba(255,255,255,.62); opacity: 1; }
+.todo-widget-item.is-overdue { border-color: #d88a8a; }
