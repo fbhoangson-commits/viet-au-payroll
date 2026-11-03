@@ -4,6 +4,7 @@ export const NAV_GROUPS = [
   ] },
   { title: "NHÂN SỰ", items: [
     { label: "Hồ sơ nhân sự", slug: "employee-master", icon: "users" },
+    { label: "Tài khoản ngân hàng", slug: "employee-bank", icon: "landmark" },
     { label: "Hợp đồng và Quyết định", slug: "contracts", icon: "file-text" },
     { label: "Lịch sử nhân sự", slug: "employee-history", icon: "history" },
   ] },
