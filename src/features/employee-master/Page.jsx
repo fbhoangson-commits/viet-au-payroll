@@ -246,9 +246,27 @@ export default function Page() {
   // Hiển thị toàn bộ hồ sơ trong một danh sách cuộn dọc; không phân trang.
   const visible = filtered;
 
+  function nextEmployeeCode() {
+    const usedNumbers = employees
+      .map(row => norm(valueForField(row, 'employee_code')).match(/^VA(\d+)$/i)?.[1])
+      .filter(Boolean)
+      .map(Number)
+      .filter(Number.isFinite);
+    const next = (usedNumbers.length ? Math.max(...usedNumbers) : 0) + 1;
+    const width = Math.max(3, ...employees.map(row => {
+      const m = norm(valueForField(row, 'employee_code')).match(/^VA(\d+)$/i);
+      return m ? m[1].length : 0;
+    }));
+    return `VA${String(next).padStart(width, '0')}`;
+  }
+
   function startCreate() {
     const initial = {};
-    DEFAULT_FIELDS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
+    fields
+      .filter(f => f.is_active !== false && !['id','created_at','updated_at'].includes(f.key))
+      .forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
+    // Mã nhân sự do hệ thống tự sinh từ mã VA lớn nhất hiện có; không cho nhập thủ công.
+    initial.employee_code = nextEmployeeCode();
     setSelected(null); setForm(initial); setEditing(true); setShowForm(true); setError(''); setNotice(null);
   }
   function openDetails(row) { setSelected(row); setForm(expandEmployee(row)); setEditing(false); setShowForm(true); setError(''); }
@@ -409,7 +427,7 @@ export default function Page() {
     {showForm && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setShowForm(false);}}}><section className="em-modal">
       <header><div><small>HỒ SƠ NHÂN SỰ</small><h3>{selected ? displayName(selected) : 'Thêm Nhân Sự'}</h3></div><button className="em-icon-btn" onClick={()=>setShowForm(false)}><X size={18}/></button></header>
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
-      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
+      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : fields.filter(f=>f.is_active !== false && !['id','created_at','updated_at'].includes(f.key))).map(field=><label className="em-field" key={field.key}><span>{field.label}{!selected && field.key==='employee_code' ? ' · Tự động' : ''}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code'} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code'} onChange={e=>updateForm(field.key,e.target.value)} placeholder={field.key==='employee_code' ? 'Hệ thống tự động sinh mã' : `Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
       <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
     </section></div>}
