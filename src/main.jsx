@@ -14,6 +14,7 @@ function App() {
   const [authError, setAuthError] = useState('');
   const [profileName, setProfileName] = useState('');
   const [profileRole, setProfileRole] = useState('');
+  const [profileRoleCode, setProfileRoleCode] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
   const [passwordModal, setPasswordModal] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -54,6 +55,7 @@ function App() {
       setProfileName(profile?.display_name || session.user.user_metadata?.display_name || session.user.user_metadata?.full_name || '');
       const role = roleRows?.[0]?.system_roles;
       setProfileRole(role?.name || '');
+      setProfileRoleCode(role?.code || '');
       const force = session.user.app_metadata?.must_change_password === true;
       setMustChangePassword(force);
       if (force) setPasswordModal(true);
@@ -83,7 +85,12 @@ function App() {
   };
   const current = allItems.find(item => item.slug === active) || allItems[0];
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
-  const filtered = useMemo(() => NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [query]);
+  const visibleNavGroups = useMemo(() => {
+    if (profileRoleCode === 'SUPER_ADMIN') return NAV_GROUPS;
+    if (profileRoleCode === 'PAYROLL_ACCOUNTANT') return NAV_GROUPS.filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG');
+    return NAV_GROUPS;
+  }, [profileRoleCode]);
+  const filtered = useMemo(() => visibleNavGroups.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [visibleNavGroups, query]);
   const select = (item, group) => { setActive(item.slug); setExpanded([group.title]); setMobileOpen(false); if (window.location.pathname !== `/${item.slug}`) window.history.pushState({ slug: item.slug }, '', `/${item.slug}`); };
   React.useEffect(() => {
     const syncPath = () => { const slug = resolvePath(window.location.pathname); setActive(slug); const item = allItems.find(x => x.slug === slug); if (item) setExpanded([item.group]); };
