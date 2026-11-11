@@ -1,17 +1,22 @@
-# VA Phase 1 – role-based system menu and activity log access
+# VA16 - FIX DỮ LIỆU DÙNG CHUNG + ẨN MENU THEO QUYỀN
 
-## Changed files
-- `src/main.jsx`: resolves the signed-in user's system role through the existing `system_is_admin()` and `system_has_role(text)` RPCs. Super Admin retains every system menu item. Payroll Accountant sees only `Nhật ký hoạt động` under `Quản lý hệ thống`. Direct navigation to other system routes is redirected. Other application groups are unchanged.
-- `supabase/migrations/20261102_accountant_activity_log_access.sql`: grants SELECT access to activity logs for Payroll Accountant as well as Super Admin. No UPDATE/DELETE access is added.
+Dựa trên `viet-au-payroll-main (16).zip`.
 
-## Deploy
-1. Replace `src/main.jsx` in GitHub with the file in this patch and deploy Cloudflare Pages.
-2. Run the included SQL migration in Supabase SQL Editor.
-3. Sign in as `tckt@thptvietau.edu.vn`: under `Quản lý hệ thống`, only `Nhật ký hoạt động` should appear. Directly opening `/user-permissions`, `/drive-backup`, `/data-restore`, `/email-settings`, `/connection-status`, or `/system-security` should redirect to `/activity-log`.
-4. Sign in as `fbhoangson@gmail.com`: all system menu items should remain visible.
+## 1. Dữ liệu dùng chung
+Thêm migration `20261111_sync_shared_data_rbac.sql`:
+- `payroll_can_operate()` nhận SUPER_ADMIN và PAYROLL_ACCOUNTANT.
+- `payroll_is_super_admin()` chỉ nhận SUPER_ADMIN.
+- Employee Master cho phép 2 vai trò truy cập dữ liệu dùng chung.
+- Không xóa/sửa dữ liệu payroll hiện có.
 
-## Scope and safety
-No changes to `PayrollCalculationPage.jsx`, payroll calculations, payroll tables, or existing payroll module code. The migration only replaces the SELECT policy on `system_activity_logs`; it does not grant log editing/deletion.
+## 2. Ẩn menu
+`src/main.jsx`:
+- SUPER_ADMIN: giữ toàn bộ menu.
+- PAYROLL_ACCOUNTANT: ẩn nhóm CẤU HÌNH LƯƠNG và các menu quản trị hệ thống không được cấp quyền.
+- Giữ `Nhật ký hoạt động` trong QUẢN LÝ HỆ THỐNG.
+- Nếu đang ở URL bị ẩn, tự chuyển về menu được phép.
 
-## Validation
-Source-level review only. A full Vite build and live Supabase/Cloudflare verification have not been run in this environment.
+## Triển khai
+1. Chạy SQL trong Supabase SQL Editor.
+2. Deploy lại web bằng `src/main.jsx`.
+3. Đăng xuất/đăng nhập lại tài khoản KẾ TOÁN TIỀN LƯƠNG.
