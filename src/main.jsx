@@ -56,7 +56,7 @@ function App() {
       const rawRole = roleRows?.[0]?.system_roles;
       const role = Array.isArray(rawRole) ? rawRole[0] : rawRole;
       setProfileRole(role?.name || '');
-      setProfileRoleCode(String(role?.code || '').trim().toUpperCase());
+      setProfileRoleCode(String(role?.code || '').toUpperCase());
       const force = session.user.app_metadata?.must_change_password === true;
       setMustChangePassword(force);
       if (force) setPasswordModal(true);
@@ -86,15 +86,10 @@ function App() {
   };
   const current = allItems.find(item => item.slug === active) || allItems[0];
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
-  const visibleNavGroups = useMemo(() => {
-    // Giữ nguyên NAV_GROUPS và chỉ lọc menu theo quyền đã đọc từ system_roles.
-    if (profileRoleCode === 'SUPER_ADMIN') return NAV_GROUPS;
-    if (profileRoleCode === 'PAYROLL_ACCOUNTANT') {
-      return NAV_GROUPS.filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG');
-    }
-    return NAV_GROUPS;
-  }, [profileRoleCode]);
-  const filtered = useMemo(() => visibleNavGroups.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [visibleNavGroups, query]);
+  const filtered = useMemo(() => NAV_GROUPS
+    .filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG' || profileRoleCode === 'SUPER_ADMIN')
+    .map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))}))
+    .filter(group => group.items.length), [query, profileRoleCode]);
   const select = (item, group) => { setActive(item.slug); setExpanded([group.title]); setMobileOpen(false); if (window.location.pathname !== `/${item.slug}`) window.history.pushState({ slug: item.slug }, '', `/${item.slug}`); };
   React.useEffect(() => {
     const syncPath = () => { const slug = resolvePath(window.location.pathname); setActive(slug); const item = allItems.find(x => x.slug === slug); if (item) setExpanded([item.group]); };
