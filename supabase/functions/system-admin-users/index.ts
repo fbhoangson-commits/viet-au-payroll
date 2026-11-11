@@ -35,6 +35,7 @@ Deno.serve(async req=>{
    try{
     const {error:assignErr}=await admin.from('system_user_roles').upsert({user_id:data.user.id,role_id:role.id,assigned_by:user.id},{onConflict:'user_id,role_id'});if(assignErr) throw assignErr;
     const {error:profileErr}=await admin.from('system_user_profiles').upsert({user_id:data.user.id,display_name:display,is_active:true},{onConflict:'user_id'});if(profileErr) throw profileErr;
+    const {error:appUserErr}=await admin.from('app_users').upsert({id:data.user.id,email,display_name:display,role:'PAYROLL_ACCOUNTANT',active:true,created_at:data.user.created_at,updated_at:new Date().toISOString()},{onConflict:'id'});if(appUserErr) throw appUserErr;
     const {error:logErr}=await admin.from('system_activity_logs').insert({actor_id:user.id,actor_email:user.email,module:'user-permissions',action:'CREATE_USER',entity_type:'auth.users',entity_id:data.user.id,description:`Tạo tài khoản ${email} với vai trò Kế toán tiền lương`});if(logErr) throw logErr;
    }catch(err){await admin.auth.admin.deleteUser(data.user.id);throw err;}
    return reply(200,{user_id:data.user.id,email});

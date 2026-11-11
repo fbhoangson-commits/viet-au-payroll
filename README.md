@@ -1,22 +1,33 @@
-# VA16 - FIX DỮ LIỆU DÙNG CHUNG + ẨN MENU THEO QUYỀN
+# VA16 – FIX DỮ LIỆU CHUNG + MENU THEO QUYỀN + SIDEBAR + ĐỒNG BỘ TÀI KHOẢN
 
-Dựa trên `viet-au-payroll-main (16).zip`.
+## 1. Dữ liệu chung
+Không tạo dữ liệu riêng cho Kế toán. Kế toán tiếp tục đọc cùng bảng production với Super Admin.
 
-## 1. Dữ liệu dùng chung
-Thêm migration `20261111_sync_shared_data_rbac.sql`:
-- `payroll_can_operate()` nhận SUPER_ADMIN và PAYROLL_ACCOUNTANT.
-- `payroll_is_super_admin()` chỉ nhận SUPER_ADMIN.
-- Employee Master cho phép 2 vai trò truy cập dữ liệu dùng chung.
-- Không xóa/sửa dữ liệu payroll hiện có.
+## 2. Đồng bộ tài khoản
+Chạy SQL migration:
+`supabase/migrations/20261111_sync_app_users_rbac.sql`
 
-## 2. Ẩn menu
-`src/main.jsx`:
-- SUPER_ADMIN: giữ toàn bộ menu.
-- PAYROLL_ACCOUNTANT: ẩn nhóm CẤU HÌNH LƯƠNG và các menu quản trị hệ thống không được cấp quyền.
-- Giữ `Nhật ký hoạt động` trong QUẢN LÝ HỆ THỐNG.
-- Nếu đang ở URL bị ẩn, tự chuyển về menu được phép.
+Migration bổ sung các Auth user hiện có nhưng thiếu `public.app_users`, đồng thời đồng bộ email/display_name/role/active.
 
-## Triển khai
-1. Chạy SQL trong Supabase SQL Editor.
-2. Deploy lại web bằng `src/main.jsx`.
-3. Đăng xuất/đăng nhập lại tài khoản KẾ TOÁN TIỀN LƯƠNG.
+Edge Function `system-admin-users` được bổ sung ghi `app_users` khi tạo tài khoản mới.
+
+## 3. Menu
+`PAYROLL_ACCOUNTANT` chỉ hiển thị các menu nghiệp vụ được cấp và Nhật ký hoạt động. Các menu cấu hình lương và quản trị hệ thống không được cấp sẽ bị ẩn.
+
+SUPER_ADMIN vẫn thấy toàn bộ menu.
+
+## 4. Sidebar
+Chỉ mở một nhóm menu tại một thời điểm. Khi chọn nhóm khác, nhóm đang mở tự thu lại. Khi query tìm kiếm thì các nhóm phù hợp vẫn mở để hiển thị kết quả.
+
+## 5. Chênh lệch Đang làm việc
+Dashboard trước đây không bung `custom_fields` trước khi kiểm tra trạng thái, trong khi Employee Master có bung `custom_fields`. Patch chuẩn hóa dữ liệu trạng thái trước khi tính KPI, tránh trường hợp Master 143 đang làm việc nhưng Dashboard 146.
+
+## 6. Lưu ý triển khai
+- Chạy SQL trên Supabase Production.
+- Deploy lại Edge Function `system-admin-users`.
+- Deploy frontend.
+- Đăng xuất/đăng nhập lại tài khoản Kế toán để tải lại role và menu.
+- Không thay đổi PayrollCalculationPage hoặc công thức tính lương.
+
+## 7. Kiểm thử
+Build chưa được xác nhận trong môi trường đóng gói này vì source không có `node_modules` và lần cài dependencies bị timeout. Không coi đây là xác nhận build thành công.
