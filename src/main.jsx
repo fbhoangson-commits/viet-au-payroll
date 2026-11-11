@@ -53,9 +53,10 @@ function App() {
       ]);
       if (!alive) return;
       setProfileName(profile?.display_name || session.user.user_metadata?.display_name || session.user.user_metadata?.full_name || '');
-      const role = roleRows?.[0]?.system_roles;
+      const rawRole = roleRows?.[0]?.system_roles;
+      const role = Array.isArray(rawRole) ? rawRole[0] : rawRole;
       setProfileRole(role?.name || '');
-      setProfileRoleCode(role?.code || '');
+      setProfileRoleCode(String(role?.code || '').trim().toUpperCase());
       const force = session.user.app_metadata?.must_change_password === true;
       setMustChangePassword(force);
       if (force) setPasswordModal(true);
@@ -86,6 +87,7 @@ function App() {
   const current = allItems.find(item => item.slug === active) || allItems[0];
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
   const visibleNavGroups = useMemo(() => {
+    // Giữ nguyên NAV_GROUPS và chỉ lọc menu theo quyền đã đọc từ system_roles.
     if (profileRoleCode === 'SUPER_ADMIN') return NAV_GROUPS;
     if (profileRoleCode === 'PAYROLL_ACCOUNTANT') {
       return NAV_GROUPS.filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG');
