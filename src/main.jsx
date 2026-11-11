@@ -47,15 +47,18 @@ function App() {
     if (!session?.user?.id || !supabase) return;
     let alive = true;
     (async () => {
-      const [{ data: profile }, { data: roleRows }] = await Promise.all([
+      const [{ data: profile }, { data: roleRows }, { data: appUser }] = await Promise.all([
         supabase.from('system_user_profiles').select('display_name').eq('user_id', session.user.id).maybeSingle(),
-        supabase.from('system_user_roles').select('system_roles(code,name)').eq('user_id', session.user.id)
+        supabase.from('system_user_roles').select('system_roles(code,name)').eq('user_id', session.user.id),
+        supabase.from('app_users').select('display_name,role,active').eq('id', session.user.id).maybeSingle()
       ]);
       if (!alive) return;
-      setProfileName(profile?.display_name || session.user.user_metadata?.display_name || session.user.user_metadata?.full_name || '');
+      setProfileName(profile?.display_name || appUser?.display_name || session.user.user_metadata?.display_name || session.user.user_metadata?.full_name || '');
       const role = roleRows?.[0]?.system_roles;
-      setProfileRole(role?.name || '');
-      setProfileRoleCode(role?.code || '');
+      const effectiveRoleCode = role?.code || appUser?.role || '';
+      const effectiveRoleName = role?.name || (effectiveRoleCode === 'SUPER_ADMIN' ? 'Super Admin' : effectiveRoleCode === 'PAYROLL_ACCOUNTANT' ? 'Kế Toán Lương' : '');
+      setProfileRole(effectiveRoleName);
+      setProfileRoleCode(effectiveRoleCode);
       const force = session.user.app_metadata?.must_change_password === true;
       setMustChangePassword(force);
       if (force) setPasswordModal(true);
