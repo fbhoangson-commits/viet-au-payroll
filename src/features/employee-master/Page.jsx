@@ -10,34 +10,69 @@ import './styles/employee-master.css';
 
 const PAGE_SIZE = 10;
 const LABELS = {
-  employee_code: 'Mã Nhân Viên', full_name: 'Họ và Tên', name: 'Họ và Tên',
-  status: 'Trạng thái nhân sự', department: 'Bộ phận', position: 'Chức danh',
-  job_title: 'Chức danh', email: 'Email', phone: 'Điện thoại',
-  phone_number: 'Điện thoại', gender: 'Giới tính', date_of_birth: 'Ngày sinh',
-  start_date: 'Ngày vào làm', hire_date: 'Ngày vào làm', end_date: 'Ngày nghỉ',
-  address: 'Địa chỉ', notes: 'Ghi chú hồ sơ',
-  national_id: 'MST / CCCD', tax_code: 'MST / CCCD',
-  employment_type: 'Phân loại', employee_group: 'Nhóm',
-  dependents_count: 'Người phụ thuộc', social_insurance: 'Tham gia BHXH',
-  created_at: 'Ngày tạo', updated_at: 'Cập nhật lúc',
-  'MST / CCCD': 'MST / CCCD', 'Phân loại': 'Phân loại', 'Nhóm': 'Nhóm',
-  'Tham gia BHXH': 'Tham gia BHXH', 'Người phụ thuộc': 'Người phụ thuộc',
-  'Ghi chú hồ sơ': 'Ghi chú hồ sơ'
+  employee_code: 'Mã Nhân Viên',
+  full_name: 'Họ và Tên',
+  name: 'Họ và Tên',
+  date_of_birth: 'Ngày Sinh',
+  gender: 'Giới Tính',
+  national_id: 'CCCD',
+  tax_code: 'Mã Số Thuế',
+  phone: 'Điện Thoại',
+  phone_number: 'Điện Thoại',
+  email: 'Email',
+  department: 'Bộ Phận',
+  position: 'Chức Danh',
+  job_title: 'Chức Danh',
+  employment_type: 'Phân Loại',
+  employment_status: 'Trạng Thái Nhân Sự',
+  status: 'Trạng Thái Nhân Sự',
+  hire_date: 'Ngày Vào Làm',
+  start_date: 'Ngày Vào Làm',
+  end_date: 'Ngày Nghỉ',
+  address: 'Địa Chỉ',
+  bank_name: 'Ngân Hàng',
+  bank_account_name: 'Tên Tài Khoản Ngân Hàng',
+  bank_account_number: 'Số Tài Khoản Ngân Hàng',
+  notes: 'Ghi Chú Hồ Sơ',
+  profile: 'Hồ Sơ',
+  employee_group: 'Nhóm',
+  dependents_count: 'Người Phụ Thuộc',
+  social_insurance: 'Tham Gia BHXH',
+  created_at: 'Ngày Tạo',
+  updated_at: 'Cập Nhật Lúc',
+  'MST / CCCD': 'MST / CCCD',
+  'Phân loại': 'Phân Loại',
+  'Nhóm': 'Nhóm',
+  'Tham gia BHXH': 'Tham Gia BHXH',
+  'Người phụ thuộc': 'Người Phụ Thuộc',
+  'Ghi chú hồ sơ': 'Ghi Chú Hồ Sơ'
 };
 // Explicit import-header mapping is required even when employees is empty.
 // Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
 const IMPORT_HEADER_MAP = {
   'mã nhân viên': 'employee_code', 'ma nhan vien': 'employee_code', 'employee_code': 'employee_code', 'mã nv': 'employee_code', 'mnv': 'employee_code',
   'họ và tên': 'full_name', 'họ và tên nhân viên': 'full_name', 'ho va ten': 'full_name', 'full_name': 'full_name', 'họ tên': 'full_name', 'ho ten': 'full_name',
-  'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status',
-  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department',
+  'ngày sinh': 'date_of_birth', 'ngay sinh': 'date_of_birth', 'date_of_birth': 'date_of_birth',
+  'giới tính': 'gender', 'gioi tinh': 'gender', 'gender': 'gender',
+  'cccd': 'national_id', 'căn cước công dân': 'national_id', 'can cuoc cong dan': 'national_id', 'national_id': 'national_id',
+  'mã số thuế': 'tax_code', 'ma so thue': 'tax_code', 'tax_code': 'tax_code',
+  'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status', 'employment_status': 'status',
+  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department', 'department': 'department',
   'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'position': 'position', 'job_title': 'job_title',
+  'phân loại': 'employment_type', 'phan loai': 'employment_type', 'employment_type': 'employment_type',
+  'nhóm': 'employee_group', 'nhom': 'employee_group', 'employee_group': 'employee_group',
   'email': 'email', 'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone',
-  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'ngày nghỉ': 'end_date', 'ngày nghỉ việc': 'end_date',
-  'địa chỉ': 'address', 'dia chi': 'address', 'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes',
-  'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date', 'mst / cccd': null,
-  'phân loại': null, 'phan loai': null, 'nhóm': null, 'nhom': null,
-  'tham gia bhxh': null, 'người phụ thuộc': null, 'nguoi phu thuoc': null
+  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'hire_date': 'hire_date', 'start_date': 'start_date',
+  'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date', 'ngày nghỉ việc': 'end_date', 'end_date': 'end_date',
+  'địa chỉ': 'address', 'dia chi': 'address', 'address': 'address',
+  'ngân hàng': 'bank_name', 'ngan hang': 'bank_name', 'bank_name': 'bank_name',
+  'tên tài khoản ngân hàng': 'bank_account_name', 'ten tai khoan ngan hang': 'bank_account_name', 'bank_account_name': 'bank_account_name',
+  'số tài khoản ngân hàng': 'bank_account_number', 'so tai khoan ngan hang': 'bank_account_number', 'bank_account_number': 'bank_account_number',
+  'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes', 'notes': 'notes',
+  'hồ sơ': 'profile', 'ho so': 'profile', 'profile': 'profile',
+  'mst / cccd': 'national_id',
+  'tham gia bhxh': 'social_insurance', 'social_insurance': 'social_insurance',
+  'người phụ thuộc': 'dependents_count', 'nguoi phu thuoc': 'dependents_count', 'dependents_count': 'dependents_count'
 };
 const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
 const mapImportHeader = header => {
@@ -128,21 +163,84 @@ async function saveWithSchemaFallback(payload, id = null) {
 }
 
 
+function buildExportData(rows) {
+  return rows.map(row => {
+    const custom = row.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields : {};
+    const order = Array.isArray(row.custom_field_order) ? row.custom_field_order : Object.keys(custom);
+    const base = Object.fromEntries(Object.entries(row).filter(([k]) => !['id','custom_fields','custom_field_order','created_at','updated_at'].includes(k)));
+    const flattened = { ...base };
+    for (const key of order) if (Object.prototype.hasOwnProperty.call(custom, key)) flattened[key] = custom[key];
+    for (const [key, value] of Object.entries(custom)) if (!Object.prototype.hasOwnProperty.call(flattened, key)) flattened[key] = value;
+    return flattened;
+  });
+}
+
+function translateExportKey(key) {
+  return LABELS[key] || key;
+}
+
+function applyExcelFormatting(wb, ws) {
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+  const widths = [];
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    let maxLen = 0;
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      const value = cell?.v == null ? '' : String(cell.v);
+      maxLen = Math.max(maxLen, value.length);
+    }
+    widths.push({ wch: Math.min(Math.max(maxLen + 2, 12), 36) });
+  }
+  ws['!cols'] = widths;
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range(range) };
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+}
+
 function downloadWorkbook(rows, fileName = 'Nhan-su-Master.xlsx') {
-  const data = rows.map(row => { const custom = row.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields : {}; const order = Array.isArray(row.custom_field_order) ? row.custom_field_order : Object.keys(custom); const base = Object.fromEntries(Object.entries(row).filter(([k]) => !['id','custom_fields','custom_field_order'].includes(k))); const flattened = { ...base }; for (const key of order) if (Object.prototype.hasOwnProperty.call(custom, key)) flattened[key] = custom[key]; for (const [key, value] of Object.entries(custom)) if (!Object.prototype.hasOwnProperty.call(flattened, key)) flattened[key] = value; return flattened; });
+  const data = buildExportData(rows);
+  const translated = data.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [translateExportKey(key), value])));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'NhanSu');
+  if (!translated.length) {
+    translated.push({});
+  }
+  const ws = XLSX.utils.json_to_sheet(translated);
+  applyExcelFormatting(wb, ws);
+  XLSX.utils.book_append_sheet(wb, ws, 'Nhân Sự');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['HƯỚNG DẪN IMPORT NHÂN SỰ'],
-    ['1. Giữ nguyên Header để hệ thống đối chiếu trường dữ liệu.'],
-    ['2. employee_code / Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
-    ['3. Dòng có mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
+    ['1. Dùng đúng tên cột tiếng Việt trong sheet Nhân Sự để hệ thống nhận diện dữ liệu.'],
+    ['2. Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
+    ['3. Mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
     ['4. Cột không có trong file sẽ không bị cập nhật.'],
-    ['5. Có thể thêm Header mới; Header mới được lưu dưới dạng trường mở rộng theo đúng thứ tự file.'],
-    ['5. Ô trống được bỏ qua khi cập nhật hồ sơ hiện có.'],
-    ['6. Không xóa nhân sự bằng cách bỏ dòng khỏi file.']
-  ]), 'HuongDan');
+    ['5. Có thể thêm cột mới; cột mới sẽ được lưu thành trường mở rộng.'],
+    ['6. Ô trống được bỏ qua khi cập nhật hồ sơ hiện có.'],
+    ['7. Không xóa nhân sự bằng cách xóa dòng khỏi file.']
+  ]), 'Hướng Dẫn');
   XLSX.writeFile(wb, fileName);
+}
+
+function downloadEmployeeTemplate() {
+  const templateKeys = [
+    'employee_code','full_name','date_of_birth','gender','national_id','tax_code',
+    'phone','email','department','position','employment_type','status','hire_date',
+    'end_date','address','bank_name','bank_account_name','bank_account_number',
+    'notes','employee_group','social_insurance','dependents_count'
+  ];
+  const headers = templateKeys.map(translateExportKey);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers]);
+  applyExcelFormatting(wb, ws);
+  XLSX.utils.book_append_sheet(wb, ws, 'Nhân Sự');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['HƯỚNG DẪN IMPORT NHÂN SỰ'],
+    ['1. Giữ nguyên tên các cột tiếng Việt để hệ thống đối chiếu.'],
+    ['2. Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
+    ['3. Mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
+    ['4. Ô trống khi cập nhật hồ sơ hiện có sẽ không làm mất dữ liệu cũ.'],
+    ['5. Có thể thêm cột mới; cột mới được lưu thành trường mở rộng.'],
+    ['6. Không xóa nhân sự bằng cách xóa dòng khỏi file.']
+  ]), 'Hướng Dẫn');
+  XLSX.writeFile(wb, 'Template-Nhan-Su-Master.xlsx');
 }
 
 export default function Page() {
@@ -246,27 +344,9 @@ export default function Page() {
   // Hiển thị toàn bộ hồ sơ trong một danh sách cuộn dọc; không phân trang.
   const visible = filtered;
 
-  function nextEmployeeCode() {
-    const usedNumbers = employees
-      .map(row => norm(valueForField(row, 'employee_code')).match(/^VA(\d+)$/i)?.[1])
-      .filter(Boolean)
-      .map(Number)
-      .filter(Number.isFinite);
-    const next = (usedNumbers.length ? Math.max(...usedNumbers) : 0) + 1;
-    const width = Math.max(3, ...employees.map(row => {
-      const m = norm(valueForField(row, 'employee_code')).match(/^VA(\d+)$/i);
-      return m ? m[1].length : 0;
-    }));
-    return `VA${String(next).padStart(width, '0')}`;
-  }
-
   function startCreate() {
     const initial = {};
-    fields
-      .filter(f => f.is_active !== false && !['id','created_at','updated_at'].includes(f.key))
-      .forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
-    // Mã nhân sự do hệ thống tự sinh từ mã VA lớn nhất hiện có; không cho nhập thủ công.
-    initial.employee_code = nextEmployeeCode();
+    DEFAULT_FIELDS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
     setSelected(null); setForm(initial); setEditing(true); setShowForm(true); setError(''); setNotice(null);
   }
   function openDetails(row) { setSelected(row); setForm(expandEmployee(row)); setEditing(false); setShowForm(true); setError(''); }
@@ -395,7 +475,7 @@ export default function Page() {
     <div className="em-title-row">
       <div><div className="em-eyebrow">DỮ LIỆU GỐC · SINGLE SOURCE OF TRUTH</div><h2>Nhân Sự Master</h2><p>Quản lý hồ sơ nhân sự tập trung cho toàn bộ hệ thống tiền lương.</p></div>
       <div className="em-actions">
-        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook([], 'Template-Nhan-Su-Master.xlsx')}><FileDown size={16}/> Tải Template</button>
+        <button className="em-btn em-btn-light" onClick={downloadEmployeeTemplate}><FileDown size={16}/> Tải Template</button>
         <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook(filtered)}><Download size={16}/> Export Excel</button>
         <button className="em-btn em-btn-light" onClick={()=>fileRef.current?.click()}><Upload size={16}/> Import Excel</button>
         <button className="em-btn em-btn-light" onClick={openColumnConfig}><Settings2 size={16}/> Cấu hình giao diện</button>
@@ -427,7 +507,7 @@ export default function Page() {
     {showForm && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setShowForm(false);}}}><section className="em-modal">
       <header><div><small>HỒ SƠ NHÂN SỰ</small><h3>{selected ? displayName(selected) : 'Thêm Nhân Sự'}</h3></div><button className="em-icon-btn" onClick={()=>setShowForm(false)}><X size={18}/></button></header>
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
-      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : fields.filter(f=>f.is_active !== false && !['id','created_at','updated_at'].includes(f.key))).map(field=><label className="em-field" key={field.key}><span>{field.label}{!selected && field.key==='employee_code' ? ' · Tự động' : ''}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code'} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code'} onChange={e=>updateForm(field.key,e.target.value)} placeholder={field.key==='employee_code' ? 'Hệ thống tự động sinh mã' : `Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
+      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
       <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
     </section></div>}

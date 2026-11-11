@@ -1,33 +1,15 @@
-# VA16 – FIX DỮ LIỆU CHUNG + MENU THEO QUYỀN + SIDEBAR + ĐỒNG BỘ TÀI KHOẢN
+# VA Payroll - Sửa Export/Import Nhân Sự Master
 
-## 1. Dữ liệu chung
-Không tạo dữ liệu riêng cho Kế toán. Kế toán tiếp tục đọc cùng bảng production với Super Admin.
+Chỉ thay đổi:
+- src/features/employee-master/Page.jsx
 
-## 2. Đồng bộ tài khoản
-Chạy SQL migration:
-`supabase/migrations/20261111_sync_app_users_rbac.sql`
+Đã xử lý:
+1. Export Excel dùng tiêu đề tiếng Việt rõ ràng.
+2. Không xuất các trường nội bộ `id`, `created_at`, `updated_at`.
+3. Tên sheet là `Nhân Sự`; sheet hướng dẫn là `Hướng Dẫn`.
+4. Template không còn trống hoàn toàn: có sẵn hàng Header tiếng Việt để nhập dữ liệu.
+5. Import nhận diện các Header tiếng Việt tương ứng.
+6. Export/Template tự động giãn độ rộng cột theo nội dung, có giới hạn để không quá rộng.
+7. Không thay đổi nghiệp vụ lưu nhân sự, tính lương hoặc dữ liệu Supabase.
 
-Migration bổ sung các Auth user hiện có nhưng thiếu `public.app_users`, đồng thời đồng bộ email/display_name/role/active.
-
-Edge Function `system-admin-users` được bổ sung ghi `app_users` khi tạo tài khoản mới.
-
-## 3. Menu
-`PAYROLL_ACCOUNTANT` chỉ hiển thị các menu nghiệp vụ được cấp và Nhật ký hoạt động. Các menu cấu hình lương và quản trị hệ thống không được cấp sẽ bị ẩn.
-
-SUPER_ADMIN vẫn thấy toàn bộ menu.
-
-## 4. Sidebar
-Chỉ mở một nhóm menu tại một thời điểm. Khi chọn nhóm khác, nhóm đang mở tự thu lại. Khi query tìm kiếm thì các nhóm phù hợp vẫn mở để hiển thị kết quả.
-
-## 5. Chênh lệch Đang làm việc
-Dashboard trước đây không bung `custom_fields` trước khi kiểm tra trạng thái, trong khi Employee Master có bung `custom_fields`. Patch chuẩn hóa dữ liệu trạng thái trước khi tính KPI, tránh trường hợp Master 143 đang làm việc nhưng Dashboard 146.
-
-## 6. Lưu ý triển khai
-- Chạy SQL trên Supabase Production.
-- Deploy lại Edge Function `system-admin-users`.
-- Deploy frontend.
-- Đăng xuất/đăng nhập lại tài khoản Kế toán để tải lại role và menu.
-- Không thay đổi PayrollCalculationPage hoặc công thức tính lương.
-
-## 7. Kiểm thử
-Build chưa được xác nhận trong môi trường đóng gói này vì source không có `node_modules` và lần cài dependencies bị timeout. Không coi đây là xác nhận build thành công.
+Thay đúng file vào source hiện tại rồi deploy frontend.
