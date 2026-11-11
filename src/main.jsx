@@ -87,7 +87,9 @@ function App() {
   const Page = pages[`./features/${active}/Page.jsx`] || pages['./features/dashboard/Page.jsx'];
   const visibleNavGroups = useMemo(() => {
     if (profileRoleCode === 'SUPER_ADMIN') return NAV_GROUPS;
-    if (profileRoleCode === 'PAYROLL_ACCOUNTANT') return NAV_GROUPS.filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG');
+    if (profileRoleCode === 'PAYROLL_ACCOUNTANT') {
+      return NAV_GROUPS.filter(group => group.title !== 'QUẢN LÝ HỆ THỐNG');
+    }
     return NAV_GROUPS;
   }, [profileRoleCode]);
   const filtered = useMemo(() => visibleNavGroups.map(group => ({...group, items: group.items.filter(item => `${item.label} ${group.title}`.toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')))})).filter(group => group.items.length), [visibleNavGroups, query]);

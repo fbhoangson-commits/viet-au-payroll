@@ -1,11 +1,5 @@
-# PATCH - Ẩn menu theo quyền
+# VA-PATCH-AN-MENU-THEO-QUYEN-V2
 
-## Phạm vi
-- Lấy nguyên source hiện tại làm gốc.
-- Chỉ thay đổi `src/main.jsx`.
-- `SUPER_ADMIN`: giữ nguyên toàn bộ menu.
-- `PAYROLL_ACCOUNTANT`: ẩn nhóm `QUẢN LÝ HỆ THỐNG` khỏi sidebar.
-- Không thay đổi `navigation.js`, các Page, nghiệp vụ lương, dữ liệu hoặc cấu hình Supabase.
+Nguồn gốc: viet-au-payroll-main (9)(1).zip.
 
-## Lưu ý
-Patch này chỉ xử lý hiển thị menu theo role trên sidebar, đúng phạm vi yêu cầu. Không thay đổi cơ chế phân quyền truy cập route/database hiện có.
+Chỉ sửa src/main.jsx. Dùng role code từ system_user_roles/system_roles để lọc sidebar: SUPER_ADMIN giữ nguyên; PAYROLL_ACCOUNTANT ẩn nhóm QUẢN LÝ HỆ THỐNG. Không sửa navigation, route, page nghiệp vụ, DB/RLS hoặc logic lương.
