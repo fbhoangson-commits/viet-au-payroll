@@ -38,15 +38,16 @@ const LABELS = Object.fromEntries(MASTER_COLUMNS.map(c => [c.key, c.label]));
 Object.assign(LABELS, { name: 'Họ và Tên', employee_name: 'Họ và Tên', phone_number: 'Điện Thoại', job_title: 'Chức Danh', start_date: 'Ngày Vào Làm', national_id: 'MST / CCCD' });
 const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
 const removeDiacritics = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
-const masterColumnByHeader = (header, sourceFields = MASTER_COLUMNS) => {
-  const exact = sourceFields.find(c => String(c.label ?? '').trim() === String(header ?? '').trim());
+const masterColumnByHeader = header => {
+  const exact = MASTER_BY_LABEL.get(String(header ?? '').trim());
   if (exact) return exact;
   const normalized = normalizeHeader(header);
-  return sourceFields.find(c => normalizeHeader(c.label) === normalized || removeDiacritics(normalizeHeader(c.label)) === removeDiacritics(normalized)) || null;
+  return MASTER_COLUMNS.find(c => normalizeHeader(c.label) === normalized || removeDiacritics(normalizeHeader(c.label)) === removeDiacritics(normalized)) || null;
 };
 // Explicit import-header mapping is required even when employees is empty.
 // Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
-const mapImportHeader = (header, sourceFields = MASTER_COLUMNS) => masterColumnByHeader(header, sourceFields)?.key || null;
+const IMPORT_HEADER_MAP = Object.fromEntries(MASTER_COLUMNS.map(c => [normalizeHeader(c.label), c.key]));
+const mapImportHeader = header => masterColumnByHeader(header)?.key || null;
 const masterValue = (row, column) => {
   const aliases = {
     cccd: ['cccd', 'national_id', 'CCCD'], tax_code: ['tax_code', 'Mã Số Thuế'], mst_cccd: ['mst_cccd', 'MST / CCCD', 'national_id', 'tax_code'],
@@ -66,7 +67,7 @@ const masterValue = (row, column) => {
 };
 const normalizeImportValue = (column, value) => {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if ((column?.data_type === 'number' || column?.type === 'number') && value !== null && value !== undefined && String(value).trim() !== '') return Number(String(value).replace(/,/g, '').trim());
+  if (column?.type === 'number' && value !== null && value !== undefined && String(value).trim() !== '') return Number(String(value).replace(/,/g, '').trim());
   return value;
 };
 const DEFAULT_FIELDS = MASTER_COLUMNS;
@@ -145,28 +146,21 @@ async function saveWithSchemaFallback(payload, id = null) {
 
 
 function formatExcelValue(value) { if (value === null || value === undefined) return ''; if (value instanceof Date) return value.toISOString().slice(0, 10); return value; }
-function downloadWorkbook(rows, exportFields, fileName = 'Nhan-su-Master.xlsx') {
-  const activeFields = exportFields.filter(f => !isInternalKey(f.key) && f.is_active !== false);
-  const data = rows.map(row => Object.fromEntries(activeFields.map(column => [column.label, formatExcelValue(masterValue(row, column))])));
-  const aoa = [activeFields.map(c => c.label), ...data.map(row => activeFields.map(c => row[c.label]))];
+function downloadWorkbook(rows, fileName = 'Nhan-su-Master.xlsx') {
+  const data = rows.map(row => Object.fromEntries(MASTER_COLUMNS.map(column => [column.label, formatExcelValue(masterValue(row, column))])));
+  const aoa = [MASTER_COLUMNS.map(c => c.label), ...data.map(row => MASTER_COLUMNS.map(c => row[c.label]))];
   const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = activeFields.map(column => {
-    const maxLen = Math.max(column.label.length, ...data.map(row => String(row[column.label] ?? '').length));
-    return { wch: Math.min(Math.max(maxLen + 2, 12), 40) };
-  });
-  if (aoa.length) ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(Math.max(activeFields.length - 1, 0))}${Math.max(1, aoa.length)}` };
+  ws['!cols'] = MASTER_COLUMNS.map(column => { const maxLen = Math.max(column.label.length, ...data.map(row => String(row[column.label] ?? '').length)); return { wch: Math.min(Math.max(maxLen + 2, 12), 38) }; });
+  ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(MASTER_COLUMNS.length - 1)}${Math.max(1, aoa.length)}` };
   XLSX.utils.book_append_sheet(wb, ws, 'Nhân Sự');
   const guide = XLSX.utils.aoa_to_sheet([
     ['HƯỚNG DẪN IMPORT NHÂN SỰ'],
-    ['File này sử dụng đúng cấu trúc Nhân Sự Master đang cấu hình trên hệ thống. Không tự thêm, đổi tên hoặc xóa cột.'],
-    ['Mã Nhân Viên là khóa đối chiếu bắt buộc nếu trường này đang có trong Master.'],
+    ['File này sử dụng đúng 22 cột của Nhân Sự Master. Không thêm hoặc đổi tên cột.'],
+    ['Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
     ['Mã đã tồn tại sẽ cập nhật hồ sơ; mã mới sẽ tạo hồ sơ mới.'],
     ['Cột bỏ trống khi cập nhật sẽ không xóa dữ liệu đang có.'],
     ['Không xóa nhân sự bằng cách xóa dòng khỏi file.']
-  ]);
-  guide['!cols'] = [{ wch: 100 }];
-  XLSX.utils.book_append_sheet(wb, guide, 'Hướng Dẫn');
-  XLSX.writeFile(wb, fileName);
+  ]); guide['!cols'] = [{ wch: 90 }]; XLSX.utils.book_append_sheet(wb, guide, 'Hướng Dẫn'); XLSX.writeFile(wb, fileName);
 }
 
 
@@ -215,36 +209,10 @@ export default function Page() {
     const importedOrder = employees.flatMap(row => customFieldOrderOf(row));
     const uniqueImported = [...new Set(importedOrder)].filter(k => !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(k));
     if (uniqueImported.length) return uniqueImported.map((key, index) => ({ key, label: labelFor(key), data_type: ['employee_code','full_name','name','email','phone','address','hire_date','start_date','date_of_birth'].includes(key) ? 'text' : 'dropdown', options: [...new Set(employees.map(r => norm(valueForField(r,key))).filter(Boolean))], show_in_list: index < 7 }));
-    const keys = new Set(employees.flatMap(row => [
-      ...Object.keys(row).filter(k => !['custom_fields','custom_field_order'].includes(k)),
-      ...customFieldOrderOf(row),
-      ...Object.keys(row?.custom_fields || {})
-    ]));
-    // Khi chưa có cấu hình cột trên Supabase, chỉ suy ra kiểu dữ liệu cho
-    // những trường thực sự đang tồn tại. MASTER_COLUMNS chỉ là metadata
-    // tương thích cho các key cũ, tuyệt đối không dùng để tự thêm trường.
-    return [...keys].filter(k => !['id','created_at','updated_at'].includes(k)).map((key,index) => {
-      const meta = MASTER_COLUMNS.find(f => f.key === key);
-      const existingOptions = [...new Set(employees.map(r => norm(valueForField(r,key))).filter(Boolean))];
-      return {
-        key,
-        label: labelFor(key),
-        data_type: meta?.type === 'date' ? 'date' : meta?.type === 'number' ? 'number' : meta?.type === 'dropdown' ? 'dropdown' : 'text',
-        options: [...new Set([...(meta?.options || []), ...existingOptions])],
-        show_in_list: index < 7,
-        is_system: ['employee_code','full_name'].includes(key),
-        is_active: true
-      };
-    });
+    const keys = new Set(employees.flatMap(row => Object.keys(row).filter(k => !['custom_fields','custom_field_order'].includes(k))));
+    DEFAULT_FIELDS.forEach(f => { if (!keys.size || keys.has(f.key)) keys.add(f.key); });
+    return [...keys].filter(k => !['id','created_at','updated_at'].includes(k)).map((key,index) => ({ key, label: labelFor(key), data_type: 'text', options: [], show_in_list: index < 7 }));
   }, [employees, columnConfigs]);
-  const formFields = useMemo(() => fields
-    .filter(f => !isInternalKey(f.key) && f.is_active !== false)
-    .map(f => {
-      const existingValues = f.data_type === 'dropdown' || f.data_type === 'multi_select'
-        ? employees.map(row => norm(valueForField(row, f.key))).filter(Boolean)
-        : [];
-      return { ...f, options: [...new Set([...(Array.isArray(f.options) ? f.options : []), ...existingValues])] };
-    }), [fields, employees]);
   const listFields = fields.filter(f => f.show_in_list !== false && !['id','created_at','updated_at','custom_fields','custom_field_order'].includes(f.key));
 
   function openColumnConfig() {
@@ -297,10 +265,30 @@ export default function Page() {
   // Hiển thị toàn bộ hồ sơ trong một danh sách cuộn dọc; không phân trang.
   const visible = filtered;
 
-  function startCreate() {
+  async function generateNextEmployeeCode() {
+    const rows = await fetchEmployees();
+    let maxNumber = 0;
+    for (const row of rows || []) {
+      const code = norm(row?.employee_code);
+      const match = code.match(/^VA(\d+)$/i);
+      if (match) maxNumber = Math.max(maxNumber, Number(match[1]));
+    }
+    return `VA${String(maxNumber + 1).padStart(3, '0')}`;
+  }
+
+  async function startCreate() {
     const initial = {};
-    formFields.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
+    MASTER_COLUMNS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
     setSelected(null); setForm(initial); setEditing(true); setShowForm(true); setError(''); setNotice(null);
+
+    try {
+      const nextCode = await generateNextEmployeeCode();
+      setForm(old => ({ ...old, employee_code: nextCode }));
+    } catch (e) {
+      setShowForm(false);
+      setEditing(false);
+      setError(`Không thể tự sinh Mã Nhân Viên: ${e?.message || 'Không tải được dữ liệu nhân sự.'}`);
+    }
   }
   function openDetails(row) { setSelected(row); setForm(expandEmployee(row)); setEditing(false); setShowForm(true); setError(''); }
   function updateForm(key, value) { setForm(old => ({ ...old, [key]: value })); }
@@ -309,11 +297,13 @@ export default function Page() {
     setError(''); setNotice(null);
     const codeKey = Object.hasOwn(form, 'employee_code') || !selected ? 'employee_code' : null;
     const nameKey = Object.hasOwn(form, 'full_name') || !selected ? 'full_name' : (Object.hasOwn(form, 'name') ? 'name' : null);
-    if (codeKey && !norm(form[codeKey])) { setError('Vui lòng nhập Mã Nhân Viên.'); return; }
     if (nameKey && !norm(form[nameKey])) { setError('Vui lòng nhập Họ và Tên.'); return; }
     setSaving(true);
     try {
-      const payload = buildEmployeePayload(form, selected);
+      // Khi THÊM mới, không tin mã đang nằm trong state/form vì có thể đã cũ.
+      // Đọc lại Master ngay trước khi lưu và sinh lại mã +1 từ mã lớn nhất hiện tại.
+      const formToSave = selected ? form : { ...form, employee_code: await generateNextEmployeeCode() };
+      const payload = buildEmployeePayload(formToSave, selected);
       const saved = await saveWithSchemaFallback(payload, selected?.id || null);
       setNotice({ type: 'success', text: selected ? 'Đã cập nhật hồ sơ nhân sự.' : 'Đã tạo hồ sơ nhân sự.' });
       setShowForm(false); setSelected(saved); await reload();
@@ -328,9 +318,9 @@ export default function Page() {
       const ws = wb.Sheets['Nhân Sự'] || wb.Sheets.NhanSu || wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
       if (!rows.length) throw new Error('File không có dòng dữ liệu.');
-      const headers = Object.keys(rows[0]); const codeHeader = headers.find(h => mapImportHeader(h, fields) === 'employee_code');
+      const headers = Object.keys(rows[0]); const codeHeader = headers.find(h => mapImportHeader(h) === 'employee_code');
       if (!codeHeader) throw new Error('Không tìm thấy cột Mã Nhân Viên. Hãy dùng đúng Template Nhân Sự Master.');
-      const unknownHeaders = headers.filter(h => !masterColumnByHeader(h, fields)); const seen = new Set(); const errors = [];
+      const unknownHeaders = headers.filter(h => !masterColumnByHeader(h)); const seen = new Set(); const errors = [];
       rows.forEach((r,i) => { const code = norm(r[codeHeader]); if (!code) errors.push({ row:i+2, message:'Thiếu Mã Nhân Viên' }); else if (seen.has(code)) errors.push({ row:i+2, message:`Mã trùng trong file: ${code}` }); seen.add(code); });
       if (unknownHeaders.length) errors.push({ row:1, message:`File có cột không thuộc Nhân Sự Master: ${unknownHeaders.join(', ')}` });
       setImportPreview({ rows, headers, codeHeader, errors, fileName:file.name, unknownHeaders });
@@ -343,11 +333,9 @@ export default function Page() {
       const current=await fetchEmployees(); const byCode=new Map(current.map(r=>[norm(r.employee_code),r]));
       for(let i=0;i<importPreview.rows.length;i++) {
         const raw=importPreview.rows[i], normalized={}, customFields={}, customOrder=[];
-        for(const column of formFields){ const header=importPreview.headers.find(h=>mapImportHeader(h, formFields)===column.key); if(!header) continue; const value=normalizeImportValue(column,raw[header]); if(value===null||value===undefined||String(value).trim()==='') continue;
-          normalized[column.key]=value;
-          if(!['employee_code','full_name','name','status','department','position','job_title','email','phone','phone_number','gender','date_of_birth','start_date','hire_date','end_date','address','notes'].includes(column.key)) {
-            customFields[column.key]=value; customOrder.push(column.key);
-          }
+        for(const column of MASTER_COLUMNS){ const header=importPreview.headers.find(h=>mapImportHeader(h)===column.key); if(!header) continue; const value=normalizeImportValue(column,raw[header]); if(value===null||value===undefined||String(value).trim()==='') continue;
+          const physicalKey={employee_code:'employee_code',full_name:'full_name',date_of_birth:'date_of_birth',gender:'gender',phone:'phone',email:'email',department:'department',position:'position',status:'status',hire_date:'hire_date'}[column.key];
+          if(physicalKey) normalized[physicalKey]=value; else { customFields[column.label]=value; customOrder.push(column.label); }
         }
         const code=norm(normalized.employee_code||raw[importPreview.codeHeader]); normalized.employee_code=code; const existing=byCode.get(code);
         try { const previous=existing||null; const mergedCustom={...(previous?.custom_fields&&typeof previous.custom_fields==='object'?previous.custom_fields:{})}; Object.assign(mergedCustom,customFields); const payload=buildEmployeePayload({...normalized,custom_fields:mergedCustom,custom_field_order:customOrder},previous); if(existing){delete payload.employee_code; await saveWithSchemaFallback(payload,existing.id); updated++;} else {await saveWithSchemaFallback(payload); created++;} }
@@ -366,8 +354,8 @@ export default function Page() {
     <div className="em-title-row">
       <div><div className="em-eyebrow">DỮ LIỆU GỐC · SINGLE SOURCE OF TRUTH</div><h2>Nhân Sự Master</h2><p>Quản lý hồ sơ nhân sự tập trung cho toàn bộ hệ thống tiền lương.</p></div>
       <div className="em-actions">
-        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook([], formFields, 'Template-Nhan-Su-Master.xlsx')}><FileDown size={16}/> Tải Template</button>
-        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook(filtered, formFields)}><Download size={16}/> Export Excel</button>
+        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook([], 'Template-Nhan-Su-Master.xlsx')}><FileDown size={16}/> Tải Template</button>
+        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook(filtered)}><Download size={16}/> Export Excel</button>
         <button className="em-btn em-btn-light" onClick={()=>fileRef.current?.click()}><Upload size={16}/> Import Excel</button>
         <button className="em-btn em-btn-light" onClick={openColumnConfig}><Settings2 size={16}/> Cấu hình giao diện</button>
         <button className="em-btn em-btn-primary" onClick={startCreate}><Plus size={17}/> Thêm Nhân Sự</button>
@@ -398,7 +386,7 @@ export default function Page() {
     {showForm && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setShowForm(false);}}}><section className="em-modal">
       <header><div><small>HỒ SƠ NHÂN SỰ</small><h3>{selected ? displayName(selected) : 'Thêm Nhân Sự'}</h3></div><button className="em-icon-btn" onClick={()=>setShowForm(false)}><X size={18}/></button></header>
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
-      <div className="em-form-grid">{formFields.map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : field.data_type === 'multi_select' ? <input type="text" value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/> : <input type={field.data_type === 'date' ? 'date' : field.data_type === 'number' || field.data_type === 'currency' ? 'number' : 'text'} value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
+      <div className="em-form-grid">{MASTER_COLUMNS.map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input type={field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'} value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at','employee_code'].includes(field.key)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={field.key==='employee_code' ? 'Tự sinh' : `Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
       <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
     </section></div>}
