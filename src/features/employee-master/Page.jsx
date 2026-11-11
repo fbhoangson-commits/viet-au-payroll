@@ -9,86 +9,68 @@ import { fetchEmployees, saveEmployee, getCurrentUserProfile, fetchEmployeeColum
 import './styles/employee-master.css';
 
 const PAGE_SIZE = 10;
-const LABELS = {
-  employee_code: 'Mã Nhân Viên',
-  full_name: 'Họ và Tên',
-  name: 'Họ và Tên',
-  date_of_birth: 'Ngày Sinh',
-  gender: 'Giới Tính',
-  national_id: 'CCCD',
-  tax_code: 'Mã Số Thuế',
-  phone: 'Điện Thoại',
-  phone_number: 'Điện Thoại',
-  email: 'Email',
-  department: 'Bộ Phận',
-  position: 'Chức Danh',
-  job_title: 'Chức Danh',
-  employment_type: 'Phân Loại',
-  employment_status: 'Trạng Thái Nhân Sự',
-  status: 'Trạng Thái Nhân Sự',
-  hire_date: 'Ngày Vào Làm',
-  start_date: 'Ngày Vào Làm',
-  end_date: 'Ngày Nghỉ',
-  address: 'Địa Chỉ',
-  bank_name: 'Ngân Hàng',
-  bank_account_name: 'Tên Tài Khoản Ngân Hàng',
-  bank_account_number: 'Số Tài Khoản Ngân Hàng',
-  notes: 'Ghi Chú Hồ Sơ',
-  profile: 'Hồ Sơ',
-  employee_group: 'Nhóm',
-  dependents_count: 'Người Phụ Thuộc',
-  social_insurance: 'Tham Gia BHXH',
-  created_at: 'Ngày Tạo',
-  updated_at: 'Cập Nhật Lúc',
-  'MST / CCCD': 'MST / CCCD',
-  'Phân loại': 'Phân Loại',
-  'Nhóm': 'Nhóm',
-  'Tham gia BHXH': 'Tham Gia BHXH',
-  'Người phụ thuộc': 'Người Phụ Thuộc',
-  'Ghi chú hồ sơ': 'Ghi Chú Hồ Sơ'
+const MASTER_COLUMNS = [
+  { key: 'employee_code', label: 'Mã Nhân Viên', required: true },
+  { key: 'full_name', label: 'Họ và Tên', required: true },
+  { key: 'date_of_birth', label: 'Ngày Sinh', type: 'date' },
+  { key: 'gender', label: 'Giới Tính', type: 'dropdown', options: ['Nam', 'Nữ', 'Khác'] },
+  { key: 'cccd', label: 'CCCD' },
+  { key: 'tax_code', label: 'Mã Số Thuế' },
+  { key: 'phone', label: 'Điện Thoại' },
+  { key: 'email', label: 'Email' },
+  { key: 'department', label: 'Bộ Phận' },
+  { key: 'position', label: 'Chức Danh' },
+  { key: 'employment_type', label: 'Phân Loại', type: 'dropdown', options: ['Cơ Hữu', 'Hợp Đồng', 'Thỉnh Giảng'] },
+  { key: 'status', label: 'Trạng Thái Nhân Sự', type: 'dropdown', options: ['Đang làm việc', 'Nghỉ chế độ', 'Nghỉ việc'] },
+  { key: 'hire_date', label: 'Ngày Vào Làm', type: 'date' },
+  { key: 'bank_name', label: 'Ngân Hàng' },
+  { key: 'bank_account_name', label: 'Tên Tài Khoản Ngân Hàng' },
+  { key: 'bank_account_number', label: 'Số Tài Khoản Ngân Hàng' },
+  { key: 'notes', label: 'Ghi Chú Hồ Sơ' },
+  { key: 'profile_documents', label: 'Hồ Sơ' },
+  { key: 'employee_group', label: 'Nhóm' },
+  { key: 'mst_cccd', label: 'MST / CCCD' },
+  { key: 'social_insurance', label: 'Tham Gia BHXH', type: 'dropdown', options: ['Có', 'Không'] },
+  { key: 'dependents_count', label: 'Người Phụ Thuộc', type: 'number' },
+];
+const MASTER_BY_LABEL = new Map(MASTER_COLUMNS.map(c => [c.label, c]));
+const LABELS = Object.fromEntries(MASTER_COLUMNS.map(c => [c.key, c.label]));
+Object.assign(LABELS, { name: 'Họ và Tên', employee_name: 'Họ và Tên', phone_number: 'Điện Thoại', job_title: 'Chức Danh', start_date: 'Ngày Vào Làm', national_id: 'MST / CCCD' });
+const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
+const removeDiacritics = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+const masterColumnByHeader = header => {
+  const exact = MASTER_BY_LABEL.get(String(header ?? '').trim());
+  if (exact) return exact;
+  const normalized = normalizeHeader(header);
+  return MASTER_COLUMNS.find(c => normalizeHeader(c.label) === normalized || removeDiacritics(normalizeHeader(c.label)) === removeDiacritics(normalized)) || null;
 };
 // Explicit import-header mapping is required even when employees is empty.
 // Never send a Vietnamese spreadsheet Header directly as a Postgres column name.
-const IMPORT_HEADER_MAP = {
-  'mã nhân viên': 'employee_code', 'ma nhan vien': 'employee_code', 'employee_code': 'employee_code', 'mã nv': 'employee_code', 'mnv': 'employee_code',
-  'họ và tên': 'full_name', 'họ và tên nhân viên': 'full_name', 'ho va ten': 'full_name', 'full_name': 'full_name', 'họ tên': 'full_name', 'ho ten': 'full_name',
-  'ngày sinh': 'date_of_birth', 'ngay sinh': 'date_of_birth', 'date_of_birth': 'date_of_birth',
-  'giới tính': 'gender', 'gioi tinh': 'gender', 'gender': 'gender',
-  'cccd': 'national_id', 'căn cước công dân': 'national_id', 'can cuoc cong dan': 'national_id', 'national_id': 'national_id',
-  'mã số thuế': 'tax_code', 'ma so thue': 'tax_code', 'tax_code': 'tax_code',
-  'trạng thái nhân sự': 'status', 'trạng thái': 'status', 'trang thai nhan su': 'status', 'status': 'status', 'employment_status': 'status',
-  'bộ phận': 'department', 'bo phan': 'department', 'phòng ban': 'department', 'phong ban': 'department', 'department': 'department',
-  'chức danh': 'position', 'chuc danh': 'position', 'chức vụ': 'position', 'chuc vu': 'position', 'position': 'position', 'job_title': 'job_title',
-  'phân loại': 'employment_type', 'phan loai': 'employment_type', 'employment_type': 'employment_type',
-  'nhóm': 'employee_group', 'nhom': 'employee_group', 'employee_group': 'employee_group',
-  'email': 'email', 'điện thoại': 'phone', 'số điện thoại': 'phone', 'phone': 'phone', 'phone_number': 'phone',
-  'ngày vào làm': 'hire_date', 'ngay vao lam': 'hire_date', 'hire_date': 'hire_date', 'start_date': 'start_date',
-  'ngày nghỉ': 'end_date', 'ngay nghi': 'end_date', 'ngày nghỉ việc': 'end_date', 'end_date': 'end_date',
-  'địa chỉ': 'address', 'dia chi': 'address', 'address': 'address',
-  'ngân hàng': 'bank_name', 'ngan hang': 'bank_name', 'bank_name': 'bank_name',
-  'tên tài khoản ngân hàng': 'bank_account_name', 'ten tai khoan ngan hang': 'bank_account_name', 'bank_account_name': 'bank_account_name',
-  'số tài khoản ngân hàng': 'bank_account_number', 'so tai khoan ngan hang': 'bank_account_number', 'bank_account_number': 'bank_account_number',
-  'ghi chú hồ sơ': 'notes', 'ghi chú': 'notes', 'ghi chu': 'notes', 'notes': 'notes',
-  'hồ sơ': 'profile', 'ho so': 'profile', 'profile': 'profile',
-  'mst / cccd': 'national_id',
-  'tham gia bhxh': 'social_insurance', 'social_insurance': 'social_insurance',
-  'người phụ thuộc': 'dependents_count', 'nguoi phu thuoc': 'dependents_count', 'dependents_count': 'dependents_count'
+const IMPORT_HEADER_MAP = Object.fromEntries(MASTER_COLUMNS.map(c => [normalizeHeader(c.label), c.key]));
+const mapImportHeader = header => masterColumnByHeader(header)?.key || null;
+const masterValue = (row, column) => {
+  const aliases = {
+    cccd: ['cccd', 'national_id', 'CCCD'], tax_code: ['tax_code', 'Mã Số Thuế'], mst_cccd: ['mst_cccd', 'MST / CCCD', 'national_id', 'tax_code'],
+    bank_name: ['bank_name', 'bank_code', 'Ngân Hàng'], bank_account_name: ['bank_account_name', 'account_holder', 'Tên Tài Khoản Ngân Hàng'], bank_account_number: ['bank_account_number', 'account_number', 'Số Tài Khoản Ngân Hàng'],
+    profile_documents: ['profile_documents', 'Hồ Sơ'], employee_group: ['employee_group', 'group', 'Nhóm'], employment_type: ['employment_type', 'Phân Loại'], social_insurance: ['social_insurance', 'Tham Gia BHXH'], dependents_count: ['dependents_count', 'dependent_count', 'Người Phụ Thuộc']
+  };
+  for (const key of (aliases[column.key] || [column.key])) {
+    if (Object.prototype.hasOwnProperty.call(row || {}, key) && row[key] !== null && row[key] !== undefined && String(row[key]).trim() !== '') return row[key];
+    const custom = row?.custom_fields;
+    if (custom && typeof custom === 'object') {
+      if (Object.prototype.hasOwnProperty.call(custom, key) && custom[key] !== null && custom[key] !== undefined && String(custom[key]).trim() !== '') return custom[key];
+      const ck = Object.keys(custom).find(k => normalizeHeader(k) === normalizeHeader(key));
+      if (ck && custom[ck] !== null && custom[ck] !== undefined && String(custom[ck]).trim() !== '') return custom[ck];
+    }
+  }
+  return '';
 };
-const normalizeHeader = header => String(header ?? '').trim().toLocaleLowerCase('vi').replace(/\s+/g, ' ');
-const mapImportHeader = header => {
-  const normalized = normalizeHeader(header);
-  return IMPORT_HEADER_MAP[normalized] || IMPORT_HEADER_MAP[normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')] || null;
+const normalizeImportValue = (column, value) => {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (column?.type === 'number' && value !== null && value !== undefined && String(value).trim() !== '') return Number(String(value).replace(/,/g, '').trim());
+  return value;
 };
-
-const DEFAULT_FIELDS = [
-  { key: 'employee_code', label: 'Mã Nhân Viên', required: true },
-  { key: 'full_name', label: 'Họ và Tên', required: true },
-  { key: 'department', label: 'Phòng Ban' },
-  { key: 'position', label: 'Chức Vụ' },
-  { key: 'phone', label: 'Điện Thoại' },
-  { key: 'email', label: 'Email' },
-  { key: 'status', label: 'Trạng Thái' }
-];
+const DEFAULT_FIELDS = MASTER_COLUMNS;
 const labelFor = key => LABELS[key] || key.replaceAll('_', ' ').replace(/\b\w/g, x => x.toUpperCase());
 const norm = v => String(v ?? '').trim();
 const employeeStatusOf = row => norm(row?.status ?? row?.employment_status ?? '').toLocaleLowerCase('vi')
@@ -163,85 +145,24 @@ async function saveWithSchemaFallback(payload, id = null) {
 }
 
 
-function buildExportData(rows) {
-  return rows.map(row => {
-    const custom = row.custom_fields && typeof row.custom_fields === 'object' ? row.custom_fields : {};
-    const order = Array.isArray(row.custom_field_order) ? row.custom_field_order : Object.keys(custom);
-    const base = Object.fromEntries(Object.entries(row).filter(([k]) => !['id','custom_fields','custom_field_order','created_at','updated_at'].includes(k)));
-    const flattened = { ...base };
-    for (const key of order) if (Object.prototype.hasOwnProperty.call(custom, key)) flattened[key] = custom[key];
-    for (const [key, value] of Object.entries(custom)) if (!Object.prototype.hasOwnProperty.call(flattened, key)) flattened[key] = value;
-    return flattened;
-  });
-}
-
-function translateExportKey(key) {
-  return LABELS[key] || key;
-}
-
-function applyExcelFormatting(wb, ws) {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-  const widths = [];
-  for (let c = range.s.c; c <= range.e.c; c++) {
-    let maxLen = 0;
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      const cell = ws[XLSX.utils.encode_cell({ r, c })];
-      const value = cell?.v == null ? '' : String(cell.v);
-      maxLen = Math.max(maxLen, value.length);
-    }
-    widths.push({ wch: Math.min(Math.max(maxLen + 2, 12), 36) });
-  }
-  ws['!cols'] = widths;
-  ws['!autofilter'] = { ref: XLSX.utils.encode_range(range) };
-  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-}
-
+function formatExcelValue(value) { if (value === null || value === undefined) return ''; if (value instanceof Date) return value.toISOString().slice(0, 10); return value; }
 function downloadWorkbook(rows, fileName = 'Nhan-su-Master.xlsx') {
-  const data = buildExportData(rows);
-  const translated = data.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [translateExportKey(key), value])));
-  const wb = XLSX.utils.book_new();
-  if (!translated.length) {
-    translated.push({});
-  }
-  const ws = XLSX.utils.json_to_sheet(translated);
-  applyExcelFormatting(wb, ws);
+  const data = rows.map(row => Object.fromEntries(MASTER_COLUMNS.map(column => [column.label, formatExcelValue(masterValue(row, column))])));
+  const aoa = [MASTER_COLUMNS.map(c => c.label), ...data.map(row => MASTER_COLUMNS.map(c => row[c.label]))];
+  const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = MASTER_COLUMNS.map(column => { const maxLen = Math.max(column.label.length, ...data.map(row => String(row[column.label] ?? '').length)); return { wch: Math.min(Math.max(maxLen + 2, 12), 38) }; });
+  ws['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(MASTER_COLUMNS.length - 1)}${Math.max(1, aoa.length)}` };
   XLSX.utils.book_append_sheet(wb, ws, 'Nhân Sự');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+  const guide = XLSX.utils.aoa_to_sheet([
     ['HƯỚNG DẪN IMPORT NHÂN SỰ'],
-    ['1. Dùng đúng tên cột tiếng Việt trong sheet Nhân Sự để hệ thống nhận diện dữ liệu.'],
-    ['2. Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
-    ['3. Mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
-    ['4. Cột không có trong file sẽ không bị cập nhật.'],
-    ['5. Có thể thêm cột mới; cột mới sẽ được lưu thành trường mở rộng.'],
-    ['6. Ô trống được bỏ qua khi cập nhật hồ sơ hiện có.'],
-    ['7. Không xóa nhân sự bằng cách xóa dòng khỏi file.']
-  ]), 'Hướng Dẫn');
-  XLSX.writeFile(wb, fileName);
+    ['File này sử dụng đúng 22 cột của Nhân Sự Master. Không thêm hoặc đổi tên cột.'],
+    ['Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
+    ['Mã đã tồn tại sẽ cập nhật hồ sơ; mã mới sẽ tạo hồ sơ mới.'],
+    ['Cột bỏ trống khi cập nhật sẽ không xóa dữ liệu đang có.'],
+    ['Không xóa nhân sự bằng cách xóa dòng khỏi file.']
+  ]); guide['!cols'] = [{ wch: 90 }]; XLSX.utils.book_append_sheet(wb, guide, 'Hướng Dẫn'); XLSX.writeFile(wb, fileName);
 }
 
-function downloadEmployeeTemplate() {
-  const templateKeys = [
-    'employee_code','full_name','date_of_birth','gender','national_id','tax_code',
-    'phone','email','department','position','employment_type','status','hire_date',
-    'end_date','address','bank_name','bank_account_name','bank_account_number',
-    'notes','employee_group','social_insurance','dependents_count'
-  ];
-  const headers = templateKeys.map(translateExportKey);
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([headers]);
-  applyExcelFormatting(wb, ws);
-  XLSX.utils.book_append_sheet(wb, ws, 'Nhân Sự');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['HƯỚNG DẪN IMPORT NHÂN SỰ'],
-    ['1. Giữ nguyên tên các cột tiếng Việt để hệ thống đối chiếu.'],
-    ['2. Mã Nhân Viên là khóa đối chiếu bắt buộc.'],
-    ['3. Mã đã tồn tại sẽ cập nhật; mã mới sẽ tạo hồ sơ mới.'],
-    ['4. Ô trống khi cập nhật hồ sơ hiện có sẽ không làm mất dữ liệu cũ.'],
-    ['5. Có thể thêm cột mới; cột mới được lưu thành trường mở rộng.'],
-    ['6. Không xóa nhân sự bằng cách xóa dòng khỏi file.']
-  ]), 'Hướng Dẫn');
-  XLSX.writeFile(wb, 'Template-Nhan-Su-Master.xlsx');
-}
 
 export default function Page() {
   const [employees, setEmployees] = useState([]);
@@ -346,7 +267,7 @@ export default function Page() {
 
   function startCreate() {
     const initial = {};
-    DEFAULT_FIELDS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
+    MASTER_COLUMNS.forEach(f => { initial[f.key] = f.key === 'status' ? 'Đang làm việc' : ''; });
     setSelected(null); setForm(initial); setEditing(true); setShowForm(true); setError(''); setNotice(null);
   }
   function openDetails(row) { setSelected(row); setForm(expandEmployee(row)); setEditing(false); setShowForm(true); setError(''); }
@@ -371,98 +292,34 @@ export default function Page() {
   async function readImport(file) {
     setError(''); setNotice(null);
     try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
-      const ws = wb.Sheets.NhanSu || wb.Sheets[wb.SheetNames[0]];
+      const buffer = await file.arrayBuffer(); const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const ws = wb.Sheets['Nhân Sự'] || wb.Sheets.NhanSu || wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
       if (!rows.length) throw new Error('File không có dòng dữ liệu.');
-      const headers = Object.keys(rows[0]);
-      const codeHeader = headers.find(h => mapImportHeader(h) === 'employee_code');
-      if (!codeHeader) throw new Error('Không tìm thấy cột Mã Nhân Viên (employee_code).');
-      const seen = new Set(); const errors = [];
-      rows.forEach((r,i) => {
-        const code = norm(r[codeHeader]);
-        if (!code) errors.push({ row: i+2, message: 'Thiếu Mã Nhân Viên' });
-        else if (seen.has(code)) errors.push({ row: i+2, message: `Mã trùng trong file: ${code}` });
-        seen.add(code);
-      });
-      setImportPreview({ rows, headers, codeHeader, errors, fileName: file.name });
-    } catch (e) { setError(e.message || 'Không đọc được file Excel.'); }
+      const headers = Object.keys(rows[0]); const codeHeader = headers.find(h => mapImportHeader(h) === 'employee_code');
+      if (!codeHeader) throw new Error('Không tìm thấy cột Mã Nhân Viên. Hãy dùng đúng Template Nhân Sự Master.');
+      const unknownHeaders = headers.filter(h => !masterColumnByHeader(h)); const seen = new Set(); const errors = [];
+      rows.forEach((r,i) => { const code = norm(r[codeHeader]); if (!code) errors.push({ row:i+2, message:'Thiếu Mã Nhân Viên' }); else if (seen.has(code)) errors.push({ row:i+2, message:`Mã trùng trong file: ${code}` }); seen.add(code); });
+      if (unknownHeaders.length) errors.push({ row:1, message:`File có cột không thuộc Nhân Sự Master: ${unknownHeaders.join(', ')}` });
+      setImportPreview({ rows, headers, codeHeader, errors, fileName:file.name, unknownHeaders });
+    } catch(e) { setError(e.message || 'Không đọc được file Excel.'); }
   }
-
   async function confirmImport() {
-    if (!importPreview || importPreview.errors.length) return;
-    setImportBusy(true); setError(''); setNotice(null);
-    let created = 0, updated = 0, failed = [];
+    if (!importPreview || importPreview.errors.length) return; setImportBusy(true); setError(''); setNotice(null);
+    let created=0, updated=0, failed=[];
     try {
-      const current = await fetchEmployees();
-      const byCode = new Map(current.map(r => [norm(r.employee_code), r]));
-      for (let i = 0; i < importPreview.rows.length; i++) {
-        const raw = importPreview.rows[i];
-        const normalized = {};
-        const dynamicFields = {};
-        const importedOrder = [];
-        for (const [header, value] of Object.entries(raw)) {
-          // Keep every workbook Header and its order, including columns whose cells are blank.
-          // Blank cells never erase existing data.
-          const mappedKey = mapImportHeader(header);
-          const converted = value instanceof Date ? value.toISOString() : value;
-          const physicalImportKeys = new Set([
-            'employee_code', 'full_name', 'status', 'department', 'position', 'job_title',
-            'email', 'phone', 'phone_number', 'gender', 'date_of_birth', 'start_date',
-            'hire_date', 'end_date', 'address', 'notes'
-          ]);
-          const fieldKey = mappedKey && physicalImportKeys.has(mappedKey) ? mappedKey : header;
-          if (!importedOrder.includes(fieldKey)) importedOrder.push(fieldKey);
-          if (value === null || value === undefined || String(value).trim() === '') continue;
-          // Only explicitly supported canonical fields are sent as physical columns. Every
-          // other Header—including dependents_count, employee_group, and future columns—is
-          // stored as dynamic data instead of being posted as a PostgreSQL column.
-          if (mappedKey && physicalImportKeys.has(mappedKey)) normalized[mappedKey] = converted;
-          else dynamicFields[header] = converted;
+      const current=await fetchEmployees(); const byCode=new Map(current.map(r=>[norm(r.employee_code),r]));
+      for(let i=0;i<importPreview.rows.length;i++) {
+        const raw=importPreview.rows[i], normalized={}, customFields={}, customOrder=[];
+        for(const column of MASTER_COLUMNS){ const header=importPreview.headers.find(h=>mapImportHeader(h)===column.key); if(!header) continue; const value=normalizeImportValue(column,raw[header]); if(value===null||value===undefined||String(value).trim()==='') continue;
+          const physicalKey={employee_code:'employee_code',full_name:'full_name',date_of_birth:'date_of_birth',gender:'gender',phone:'phone',email:'email',department:'department',position:'position',status:'status',hire_date:'hire_date'}[column.key];
+          if(physicalKey) normalized[physicalKey]=value; else { customFields[column.label]=value; customOrder.push(column.label); }
         }
-        const code = norm(normalized.employee_code || raw[importPreview.codeHeader]);
-        normalized.employee_code = code;
-        const existing = byCode.get(code);
-        try {
-          const previous = existing || null;
-          const mergedCustom = { ...(previous?.custom_fields && typeof previous.custom_fields === 'object' ? previous.custom_fields : {}) };
-          Object.assign(mergedCustom, dynamicFields);
-          // Header order from the workbook is authoritative for dynamic fields.
-          const payload = buildEmployeePayload({ ...normalized, custom_fields: mergedCustom, custom_field_order: importedOrder }, previous);
-          if (existing) {
-            delete payload.employee_code; // protect stable identity key on update
-            await saveWithSchemaFallback(payload, existing.id); updated++;
-          } else {
-            await saveWithSchemaFallback(payload); created++;
-          }
-        } catch (e) { failed.push({ row: i+2, code, message: e.message }); }
+        const code=norm(normalized.employee_code||raw[importPreview.codeHeader]); normalized.employee_code=code; const existing=byCode.get(code);
+        try { const previous=existing||null; const mergedCustom={...(previous?.custom_fields&&typeof previous.custom_fields==='object'?previous.custom_fields:{})}; Object.assign(mergedCustom,customFields); const payload=buildEmployeePayload({...normalized,custom_fields:mergedCustom,custom_field_order:customOrder},previous); if(existing){delete payload.employee_code; await saveWithSchemaFallback(payload,existing.id); updated++;} else {await saveWithSchemaFallback(payload); created++;} }
+        catch(e){failed.push({row:i+2,code,message:e.message});}
       }
-      // Persist column definitions from workbook Headers; preserve workbook order.
-      try {
-        const importedConfigs = importPreview.headers.map((header, index) => {
-          const mappedKey = mapImportHeader(header);
-          const physical = new Set(['employee_code','full_name','status','department','position','job_title','email','phone','phone_number','gender','date_of_birth','start_date','hire_date','end_date','address','notes']);
-          const key = mappedKey && physical.has(mappedKey) ? mappedKey : header;
-          const values = [...new Set(importPreview.rows.map(r=>norm(r[header])).filter(Boolean))];
-          const isCoreText = ['employee_code','full_name','name','email','phone','phone_number','address','notes','date_of_birth','start_date','hire_date','end_date'].includes(key);
-          const likelyDropdown = !isCoreText && (values.length <= 50 || /phòng ban|bộ phận|chức vụ|chức danh|phân loại|nhóm|trạng thái|bhxh|giới tính/i.test(header));
-          const existingConfig = columnConfigs.find(c=>c.field_key===key);
-          return { field_key:key, label:header, data_type: existingConfig?.data_type || (likelyDropdown ? 'dropdown' : 'text'), show_in_list: existingConfig ? existingConfig.show_in_list : index < 7, display_order:index, options: [...new Set([...(existingConfig?.options || []), ...(likelyDropdown ? values : [])])], is_system:['employee_code','full_name'].includes(key), is_active:true };
-        });
-        const importedKeys = new Set(importedConfigs.map(c=>c.field_key));
-        const retainedConfigs = columnConfigs.filter(c=>!importedKeys.has(c.field_key)).map((c,index)=>({...c, display_order: importedConfigs.length + index}));
-        const savedConfigs = await saveEmployeeColumnConfigs([...importedConfigs, ...retainedConfigs]);
-        setColumnConfigs(savedConfigs.sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0)));
-        setConfigWarning('');
-      } catch (configError) {
-        setConfigWarning(`Đã nhập dữ liệu nhưng chưa lưu được cấu hình cột: ${configError.message}. Kiểm tra migration và RLS.`);
-      }
-      await reload();
-      if (failed.length) {
-        setError(`Đã xử lý ${created+updated} hồ sơ; ${failed.length} dòng lỗi. ${failed.slice(0,3).map(x=>`Dòng ${x.row} (${x.code}): ${x.message}`).join(' | ')}`);
-      } else setNotice({ type: 'success', text: `Import thành công: ${created} hồ sơ mới, ${updated} hồ sơ cập nhật.` });
-      setImportPreview(null);
+      await reload(); if(failed.length) setError(`Đã xử lý ${created+updated} hồ sơ; ${failed.length} dòng lỗi. ${failed.slice(0,3).map(x=>`Dòng ${x.row} (${x.code}): ${x.message}`).join(' | ')}`); else setNotice({type:'success',text:`Import thành công: ${created} hồ sơ mới, ${updated} hồ sơ cập nhật.`}); setImportPreview(null);
     } finally { setImportBusy(false); }
   }
 
@@ -475,7 +332,7 @@ export default function Page() {
     <div className="em-title-row">
       <div><div className="em-eyebrow">DỮ LIỆU GỐC · SINGLE SOURCE OF TRUTH</div><h2>Nhân Sự Master</h2><p>Quản lý hồ sơ nhân sự tập trung cho toàn bộ hệ thống tiền lương.</p></div>
       <div className="em-actions">
-        <button className="em-btn em-btn-light" onClick={downloadEmployeeTemplate}><FileDown size={16}/> Tải Template</button>
+        <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook([], 'Template-Nhan-Su-Master.xlsx')}><FileDown size={16}/> Tải Template</button>
         <button className="em-btn em-btn-light" onClick={()=>downloadWorkbook(filtered)}><Download size={16}/> Export Excel</button>
         <button className="em-btn em-btn-light" onClick={()=>fileRef.current?.click()}><Upload size={16}/> Import Excel</button>
         <button className="em-btn em-btn-light" onClick={openColumnConfig}><Settings2 size={16}/> Cấu hình giao diện</button>
@@ -507,7 +364,7 @@ export default function Page() {
     {showForm && <div className="em-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setShowForm(false);}}}><section className="em-modal">
       <header><div><small>HỒ SƠ NHÂN SỰ</small><h3>{selected ? displayName(selected) : 'Thêm Nhân Sự'}</h3></div><button className="em-icon-btn" onClick={()=>setShowForm(false)}><X size={18}/></button></header>
       {error && <div className="em-alert danger"><AlertCircle size={16}/>{error}</div>}
-      <div className="em-form-grid">{(selected ? fields.filter(f=>!['id','created_at','updated_at'].includes(f.key)) : DEFAULT_FIELDS).map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
+      <div className="em-form-grid">{MASTER_COLUMNS.map(field=><label className="em-field" key={field.key}><span>{field.label}</span>{editing ? (field.data_type === 'dropdown' ? <select value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key)} onChange={async e=>{ if(e.target.value==='__ADD_NEW__'){ const value=window.prompt(`Thêm giá trị cho ${field.label}:`); if(value&&value.trim()){const ok=await addDropdownOption(field,value.trim()); if(ok) updateForm(field.key,value.trim());} } else updateForm(field.key,e.target.value); }}><option value="">— Chọn {field.label} —</option>{[...new Set([...(field.options||[]), ...(form[field.key]?[String(form[field.key])]:[])])].map(opt=><option key={opt} value={opt}>{opt}</option>)}<option value="__ADD_NEW__">＋ Thêm mới...</option></select> : <input type={field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'} value={form[field.key] == null ? '' : String(form[field.key])} disabled={['id','created_at','updated_at'].includes(field.key) || field.key==='employee_code' && Boolean(selected)} onChange={e=>updateForm(field.key,e.target.value)} placeholder={`Nhập ${field.label.toLocaleLowerCase('vi')}`}/>) : <div className="em-read-value">{form[field.key] == null || form[field.key] === '' ? '—' : String(form[field.key])}</div>}</label>)}</div>
       {!editing && selected && <details className="em-raw-details"><summary>Xem toàn bộ dữ liệu hồ sơ</summary><pre>{JSON.stringify(selected,null,2)}</pre></details>}
       <footer>{editing ? <><button className="em-btn em-btn-light" onClick={()=>{if(selected){setForm(expandEmployee(selected));setEditing(false);}else setShowForm(false);}}>Hủy</button><button className="em-btn em-btn-primary" disabled={saving} onClick={save}><Save size={16}/>{saving?'Đang lưu…':'Lưu hồ sơ'}</button></> : <><button className="em-btn em-btn-light" onClick={()=>setShowForm(false)}>Đóng</button><button className="em-btn em-btn-primary" onClick={()=>setEditing(true)}><Pencil size={16}/> Chỉnh sửa</button></>}</footer>
     </section></div>}
@@ -522,7 +379,7 @@ export default function Page() {
     {importPreview && <div className="em-modal-backdrop"><section className="em-modal em-import-modal"><header><div><small>IMPORT EXCEL</small><h3>Xem trước dữ liệu</h3><p>{importPreview.fileName} · {importPreview.rows.length} dòng</p></div><button className="em-icon-btn" onClick={()=>setImportPreview(null)}><X size={18}/></button></header>
       <div className="em-import-summary"><span><CheckCircle2 size={16}/>{importPreview.rows.length-importPreview.errors.length} dòng hợp lệ</span><span className={importPreview.errors.length?'bad':''}><AlertCircle size={16}/>{importPreview.errors.length} lỗi</span></div>
       {importPreview.errors.length>0 && <div className="em-import-errors">{importPreview.errors.map((e,i)=><div key={i}>Dòng {e.row}: {e.message}</div>)}</div>}
-      <div className="em-import-table"><table><thead><tr>{importPreview.headers.slice(0,6).map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{importPreview.rows.slice(0,5).map((r,i)=><tr key={i}>{importPreview.headers.slice(0,6).map(h=><td key={h}>{String(r[h] ?? '')}</td>)}</tr>)}</tbody></table></div>
+      <div className="em-import-table"><table><thead><tr>{importPreview.headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{importPreview.rows.slice(0,5).map((r,i)=><tr key={i}>{importPreview.headers.map(h=><td key={h}>{String(r[h] ?? '')}</td>)}</tr>)}</tbody></table></div>
       <footer><button className="em-btn em-btn-light" onClick={()=>setImportPreview(null)}>Hủy</button><button className="em-btn em-btn-primary" disabled={importBusy || importPreview.errors.length>0} onClick={confirmImport}><FileSpreadsheet size={16}/>{importBusy?'Đang import…':'Xác nhận Import'}</button></footer>
     </section></div>}
   </section>;
